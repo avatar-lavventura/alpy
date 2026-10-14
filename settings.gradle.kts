@@ -11,5 +11,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "nagger"
+rootProject.name = "alpy"
 include(":app")

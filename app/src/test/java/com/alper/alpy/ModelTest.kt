@@ -1,8 +1,9 @@
-package com.alper.nagger
+package com.alper.alpy
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
 import java.time.ZoneOffset
@@ -56,7 +57,21 @@ class ModelTest {
         r.fire(r.fireAt()!!, z).let { x = it.first; ev = it.second }
         assertEquals(Fire.NAG, ev); r = x
         assertNull(r.fireAt())
-        assertFalse(r.enabled)
+        assertFalse(r.done)
+        assertTrue(r.done().done)
+    }
+
+    @Test fun checkSkipsRepeatOrFinishesOnce() {
+        val start = ms("2026-10-14T09:00")
+        val daily = Reminder(start = start, rule = Every.DAYS, nextAt = start)
+        assertEquals(ms("2026-10-15T09:00"), daily.check(z).nextAt)
+        assertTrue(Reminder(start = start, nextAt = start).check(z).done)
+    }
+
+    @Test fun adjustOverduePushesFromNow() {
+        val r = Reminder(start = ms("2026-10-14T09:00"))
+        assertEquals(ms("2026-10-14T10:05"), r.adjust(5 * 60_000, ms("2026-10-14T10:00:30")).nextAt)
+        assertEquals(ms("2026-10-14T08:00"), r.adjust(-60 * 60_000, ms("2026-10-14T10:00")).start)
     }
 
     @Test fun preAlarmThenMain() {

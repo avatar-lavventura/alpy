@@ -1,4 +1,4 @@
-package com.alper.nagger
+package com.alper.alpy
 
 import kotlinx.serialization.Serializable
 import java.time.Duration
@@ -25,7 +25,10 @@ data class Reminder(
     val category: String = "",
     val sound: String? = null,
     val fullScreen: Boolean = true,
-    val enabled: Boolean = true,
+    val soundOn: Boolean = true,
+    val snoozeMin: Int = 10,
+    val enabled: Boolean = true,         // alarm on/off (power button)
+    val done: Boolean = false,           // checked off, shown under Done
     val start: Long = 0,                 // first occurrence, epoch ms
     val rule: Every = Every.ONCE,
     val every: Int = 1,
@@ -82,7 +85,7 @@ fun Reminder.occurrenceAfter(after: Long, zone: ZoneId = ZoneId.systemDefault())
 }
 
 /** Next time this reminder needs an alarm. */
-fun Reminder.fireAt(): Long? = if (!enabled) null else listOfNotNull(
+fun Reminder.fireAt(): Long? = if (!enabled || done) null else listOfNotNull(
     nextAt?.takeIf { preMin > 0 && !preFired }?.minus(preMin * MIN), nagAt, nextAt
 ).minOrNull()
 
@@ -104,14 +107,40 @@ fun Reminder.fire(now: Long, zone: ZoneId = ZoneId.systemDefault()): Pair<Remind
         na != null && preMin > 0 && !preFired && na - preMin * MIN <= now -> copy(preFired = true) to Fire.PRE
         else -> this to null
     }
-    return r.copy(enabled = r.nextAt != null || r.nagAt != null) to ev
+    return r to ev
 }
 
-fun Reminder.done() = copy(nagAt = null, nagCount = 0, activeSince = null, enabled = nextAt != null)
+/** Done on an alert: stops nagging; a reminder with nothing left to fire moves to Done. */
+fun Reminder.done() = copy(nagAt = null, nagCount = 0, activeSince = null, done = nextAt == null)
 
 fun Reminder.rescheduled(now: Long) = copy(
     nextAt = occurrenceAfter(now), preFired = false, nagAt = null, nagCount = 0, activeSince = null,
-).let { it.copy(enabled = it.nextAt != null) }
+)
+
+/** The time the list shows: snooze/nag, else next occurrence, else the (overdue) start. */
+fun Reminder.shownAt() = nagAt ?: nextAt ?: start
+
+/** List checkbox: finish the ringing one, skip this occurrence of a repeat, or move a one-off to Done. */
+fun Reminder.check(zone: ZoneId = ZoneId.systemDefault()): Reminder {
+    val na = nextAt
+    return when {
+        activeSince != null || nagAt != null -> done()
+        rule != Every.ONCE && na != null -> occurrenceAfter(na, zone)
+            ?.let { copy(nextAt = it, preFired = false) } ?: copy(done = true)
+        else -> copy(done = true)
+    }
+}
+
+/** Quick-adjust buttons (-5m .. +1d). Pushing an overdue time forward counts from now. */
+fun Reminder.adjust(deltaMs: Long, now: Long): Reminder {
+    val base = shownAt().let { if (it < now && deltaMs > 0) now / MIN * MIN else it }
+    val t = base + deltaMs
+    return when {
+        nagAt != null -> copy(nagAt = t)
+        rule == Every.ONCE -> copy(start = t, nextAt = t.takeIf { it > now }, preFired = false, activeSince = null)
+        else -> copy(nextAt = t, preFired = false)
+    }
+}
 
 @Serializable
 data class Step(val sec: Long = 300, val msg: String = "")

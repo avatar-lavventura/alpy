@@ -1,4 +1,4 @@
-package com.alper.nagger
+package com.alper.alpy
 
 import android.app.AlarmManager
 import android.app.Application
@@ -33,6 +33,7 @@ class App : Application() {
         getSystemService(NotificationManager::class.java).createNotificationChannels(listOf(
             NotificationChannel("alerts", "Alerts (full screen)", NotificationManager.IMPORTANCE_HIGH).apply { setSound(null, null) },
             NotificationChannel("reminders", "Reminders (heads-up)", NotificationManager.IMPORTANCE_HIGH),
+            NotificationChannel("quiet", "Reminders (silent)", NotificationManager.IMPORTANCE_HIGH).apply { setSound(null, null) },
             NotificationChannel("timers", "Running timers", NotificationManager.IMPORTANCE_LOW),
         ))
     }
@@ -51,14 +52,14 @@ class BootReceiver : BroadcastReceiver() {
 
 private fun broadcast(ctx: Context, action: String, kind: String, id: Int, min: Int? = null) =
     PendingIntent.getBroadcast(ctx, min ?: 0, Intent(ctx, AlarmReceiver::class.java).setAction(action)
-        .setData(Uri.parse("nagger://$kind/$id")).apply { if (min != null) putExtra("min", min) }, FLAGS)
+        .setData(Uri.parse("alpy://$kind/$id")).apply { if (min != null) putExtra("min", min) }, FLAGS)
 
 private fun nm(ctx: Context) = ctx.getSystemService(NotificationManager::class.java)
 
 /** Every state change (alarm, notification button, alert screen, UI) goes through here. */
 fun act(ctx: Context, action: String, kind: String, id: Int, min: Int = Store.data.value.snoozeMin) {
     val now = System.currentTimeMillis()
-    if (action in setOf("done", "snooze", "silence", "restart")) {
+    if (action in setOf("done", "check", "snooze", "silence", "restart")) {
         AlertService.stop()
         nm(ctx).cancel(id)
     }
@@ -68,16 +69,19 @@ fun act(ctx: Context, action: String, kind: String, id: Int, min: Int = Store.da
             when (action) {
                 "fire" -> it.fire(now).let { (r, e) -> ev = e; r }
                 "done" -> it.done()
+                "check" -> it.check()
+                "uncheck" -> it.copy(done = false).rescheduled(now)
+                "adjust" -> it.adjust(min * 60_000L, now)
                 "snooze" -> it.copy(nagAt = now + min * 60_000L, enabled = true)
-                "on" -> it.rescheduled(now)
+                "on" -> it.copy(enabled = true).rescheduled(now)
                 "off" -> it.copy(enabled = false, nagAt = null, activeSince = null)
                 else -> it
             }
         } ?: return
         Alarms.sync(ctx, r)
         when (ev) {
-            Fire.PRE -> Alerts.show(ctx, "r", id, "Soon: ${r.title}", "In ${r.preMin} min", r.sound, r.fullScreen)
-            Fire.MAIN, Fire.NAG -> Alerts.show(ctx, "r", id, r.title, r.notes, r.sound, r.fullScreen)
+            Fire.PRE -> Alerts.show(ctx, "r", id, "Soon: ${r.title}", "In ${r.preMin} min", r.sound, r.fullScreen, r.snoozeMin, !r.soundOn)
+            Fire.MAIN, Fire.NAG -> Alerts.show(ctx, "r", id, r.title, r.notes, r.sound, r.fullScreen, r.snoozeMin, !r.soundOn)
             null -> {}
         }
     } else {
@@ -136,11 +140,13 @@ object Alerts {
     private fun action(ctx: Context, title: String, a: String, kind: String, id: Int, min: Int? = null) =
         Notification.Action.Builder(null as Icon?, title, broadcast(ctx, a, kind, id, min)).build()
 
-    fun show(ctx: Context, kind: String, id: Int, title: String, text: String, sound: String?, full: Boolean) {
+    fun show(
+        ctx: Context, kind: String, id: Int, title: String, text: String, sound: String?, full: Boolean,
+        snooze: Int = Store.data.value.snoozeMin, quiet: Boolean = false,
+    ) {
         val screen = PendingIntent.getActivity(ctx, id, Intent(ctx, AlertActivity::class.java)
             .putExtra("kind", kind).putExtra("id", id).putExtra("title", title).putExtra("text", text), FLAGS)
-        val snooze = Store.data.value.snoozeMin
-        val n = Notification.Builder(ctx, if (full) "alerts" else "reminders")
+        val n = Notification.Builder(ctx, if (full) "alerts" else if (quiet) "quiet" else "reminders")
             .setSmallIcon(ICON).setContentTitle(title).setContentText(text)
             .setCategory(Notification.CATEGORY_ALARM).setContentIntent(screen)
             .apply { if (full) setFullScreenIntent(screen, true) }
@@ -156,7 +162,7 @@ object Alerts {
         if (full) {
             try {
                 ctx.startForegroundService(Intent(ctx, AlertService::class.java)
-                    .putExtra("id", id).putExtra("sound", sound).putExtra("n", n))
+                    .putExtra("id", id).putExtra("sound", sound).putExtra("quiet", quiet).putExtra("n", n))
                 return
             } catch (e: Exception) {
                 // Background start refused (e.g. inexact fallback alarm): plain notification below.
@@ -202,7 +208,7 @@ class AlertService : Service() {
         startForeground(i.getIntExtra("id", 0), n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         ringtone?.stop()
         val uri = i.getStringExtra("sound")?.let(Uri::parse) ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-        ringtone = RingtoneManager.getRingtone(this, uri)?.apply {
+        ringtone = if (i.getBooleanExtra("quiet", false)) null else RingtoneManager.getRingtone(this, uri)?.apply {
             audioAttributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
             isLooping = true

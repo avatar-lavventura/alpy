@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.alper.nagger"
+    namespace = "com.alper.alpy"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.alper.nagger"
+        applicationId = "com.alper.alpy"
         minSdk = 29
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()

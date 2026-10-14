@@ -30,5 +30,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/release/app-release.apk nagger.apk
-          gh release create "v1.0.${{ github.run_number }}" nagger.apk --title "Nagger 1.0.${{ github.run_number }}" --notes "${{ github.event.head_commit.message }}"
+          cp app/build/outputs/apk/release/app-release.apk alpy.apk
+          gh release create "v1.0.${{ github.run_number }}" alpy.apk --title "Alpy 1.0.${{ github.run_number }}" --notes "${{ github.event.head_commit.message }}"

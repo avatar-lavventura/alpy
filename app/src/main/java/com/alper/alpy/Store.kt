@@ -1,4 +1,4 @@
-package com.alper.nagger
+package com.alper.alpy
 
 import android.content.ContentUris
 import android.content.ContentValues
@@ -45,7 +45,7 @@ object Store {
     fun editTimer(id: Int, f: (Timer) -> Timer) =
         update { d -> d.copy(timers = d.timers.map { if (it.id == id) f(it) else it }) }.timers.find { it.id == id }
 
-    /** Once a day, a copy to Download/Nagger/ (survives uninstall); keeps the newest 7. */
+    /** Once a day, a copy to Download/Alpy/ (survives uninstall); keeps the newest 7. */
     private fun dailyBackup(d: Data) {
         val today = LocalDate.now().toString()
         val prefs = app.getSharedPreferences("store", 0)
@@ -53,16 +53,16 @@ object Store {
         runCatching {
             val cr = app.contentResolver
             val coll = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val dir = Environment.DIRECTORY_DOWNLOADS + "/Nagger/"
+            val dir = Environment.DIRECTORY_DOWNLOADS + "/Alpy/"
             val uri = cr.insert(coll, ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, "nagger-$today.json")
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "alpy-$today.json")
                 put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
                 put(MediaStore.MediaColumns.RELATIVE_PATH, dir)
             })!!
             cr.openOutputStream(uri)!!.use { it.write(json.encodeToString(Data.serializer(), d).toByteArray()) }
             cr.query(
                 coll, arrayOf(MediaStore.MediaColumns._ID),
-                "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE 'nagger-%'",
+                "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE 'alpy-%'",
                 arrayOf(dir), "${MediaStore.MediaColumns.DISPLAY_NAME} DESC",
             )?.use { c ->
                 var n = 0
