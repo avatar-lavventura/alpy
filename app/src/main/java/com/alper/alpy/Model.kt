@@ -143,37 +143,9 @@ fun Reminder.adjust(deltaMs: Long, now: Long): Reminder {
 }
 
 @Serializable
-data class Step(val sec: Long = 300, val msg: String = "")
-
-@Serializable
-data class Timer(
-    val id: Int = 0,
-    val name: String = "",
-    val category: String = "",
-    val sound: String? = null,
-    val steps: List<Step> = listOf(Step()),
-    val gapSec: Long = 0,
-    val countUp: Boolean = false,
-    // runtime state
-    val idx: Int = 0,
-    val runningSince: Long? = null,      // may be in the future during a queue gap
-    val elapsedMs: Long = 0,
-)
-
-fun Timer.stepMs() = steps[idx].sec * 1000
-fun Timer.elapsed(now: Long) = elapsedMs + (runningSince?.let { now - it } ?: 0)
-fun Timer.endAt(): Long? = if (countUp) null else runningSince?.let { it + stepMs() - elapsedMs }
-fun Timer.start(now: Long) = if (runningSince != null) this else copy(runningSince = now)
-fun Timer.pause(now: Long) = copy(elapsedMs = elapsed(now), runningSince = null)
-fun Timer.reset() = copy(idx = 0, runningSince = null, elapsedMs = 0)
-fun Timer.finishStep(now: Long) =
-    if (idx + 1 < steps.size) copy(idx = idx + 1, elapsedMs = 0, runningSince = now + gapSec * 1000) else reset()
-
-@Serializable
 data class Data(
     val nextId: Int = 1,
     val reminders: List<Reminder> = emptyList(),
-    val timers: List<Timer> = emptyList(),
     val snoozeMin: Int = 10,
     val silenceMin: Int = 5,
 )

@@ -42,9 +42,6 @@ object Store {
     fun editReminder(id: Int, f: (Reminder) -> Reminder) =
         update { d -> d.copy(reminders = d.reminders.map { if (it.id == id) f(it) else it }) }.reminders.find { it.id == id }
 
-    fun editTimer(id: Int, f: (Timer) -> Timer) =
-        update { d -> d.copy(timers = d.timers.map { if (it.id == id) f(it) else it }) }.timers.find { it.id == id }
-
     /** Once a day, a copy to Download/Alpy/ (survives uninstall); keeps the newest 7. */
     private fun dailyBackup(d: Data) {
         val today = LocalDate.now().toString()

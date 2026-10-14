@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlarmManager
 import android.app.NotificationManager
-import android.content.Context
 import android.content.Intent
 import android.media.RingtoneManager
 import android.net.Uri
@@ -53,13 +52,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DisplayMode
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -80,9 +81,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TimeInput
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -111,19 +114,18 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 
 private sealed interface Screen
 private data object Home : Screen
 private data class EditR(val r: Reminder) : Screen
-private data class EditT(val t: Timer) : Screen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -141,7 +143,6 @@ class MainActivity : ComponentActivity() {
                 when (val s = screen) {
                     Home -> HomeScreen(tab, { tab = it }, showDone, { showDone = it }) { screen = it }
                     is EditR -> ReminderEditor(s.r, back)
-                    is EditT -> TimerEditor(s.t, back)
                 }
             }
         }
@@ -222,18 +223,13 @@ private fun section(t: Long): Pair<Int, String> {
 }
 
 @Composable
-private fun ClockIcon(modifier: Modifier = Modifier, color: Color = LocalContentColor.current, timer: Boolean = false) =
+private fun ClockIcon(modifier: Modifier = Modifier, color: Color = LocalContentColor.current) =
     Canvas(modifier) {
         val w = size.minDimension / 14
         val r = size.minDimension / 2 - w
         drawCircle(color, r, style = Stroke(w))
-        if (timer) {
-            drawLine(color, center, center + Offset(r * 0.45f, -r * 0.5f), w, StrokeCap.Round)
-            drawCircle(color, w)
-        } else {
-            drawLine(color, center, center - Offset(0f, r * 0.6f), w, StrokeCap.Round)
-            drawLine(color, center, center - Offset(r * 0.45f, 0f), w, StrokeCap.Round)
-        }
+        drawLine(color, center, center - Offset(0f, r * 0.6f), w, StrokeCap.Round)
+        drawLine(color, center, center - Offset(r * 0.45f, 0f), w, StrokeCap.Round)
     }
 
 @Composable
@@ -377,6 +373,30 @@ private fun TimeButton(label: String, minutes: Int, onPick: (Int) -> Unit) {
     }
 }
 
+/** Date and time typed on the keyboard (date field follows the phone's locale format). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TypeDateDialog(value: LocalDateTime, close: () -> Unit, onPick: (LocalDateTime) -> Unit) {
+    val ds = rememberDatePickerState(
+        initialSelectedDateMillis = value.toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+        initialDisplayMode = DisplayMode.Input,
+    )
+    val ts = rememberTimePickerState(value.hour, value.minute, true)
+    DatePickerDialog(
+        close,
+        confirmButton = {
+            TextButton({
+                ds.selectedDateMillis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate().atTime(ts.hour, ts.minute)) }
+                close()
+            }) { Text("OK") }
+        },
+        dismissButton = { TextButton(close) { Text("Cancel") } },
+    ) {
+        DatePicker(ds)
+        TimeInput(ts, Modifier.align(Alignment.CenterHorizontally).padding(16.dp))
+    }
+}
+
 /** iOS-style scroll wheel; settles on the row nearest the middle line. */
 @Composable
 private fun Wheel(items: List<String>, selected: Int, modifier: Modifier, onSelect: (Int) -> Unit) {
@@ -464,14 +484,12 @@ private fun HomeScreen(tab: Int, setTab: (Int) -> Unit, showDone: Boolean, setDo
                 selectedIconColor = cs.primary, selectedTextColor = cs.primary, indicatorColor = Color.Transparent,
             )
             NavigationBarItem(tab == 0, { setTab(0) }, { ClockIcon(Modifier.size(24.dp)) }, label = { Text("Reminders") }, colors = colors)
-            NavigationBarItem(tab == 1, { setTab(1) }, { ClockIcon(Modifier.size(24.dp), timer = true) }, label = { Text("Timers") }, colors = colors)
-            NavigationBarItem(tab == 2, { setTab(2) }, { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") }, colors = colors)
+            NavigationBarItem(tab == 1, { setTab(1) }, { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") }, colors = colors)
         }
     }) { pad ->
         Column(Modifier.padding(pad)) {
             when (tab) {
                 0 -> RemindersTab(d, now, showDone, setDone, open)
-                1 -> TimersTab(d, now, open)
                 else -> SettingsTab(d)
             }
         }
@@ -566,49 +584,6 @@ private fun QuickPanel(r: Reminder, onEdit: () -> Unit, onNotes: () -> Unit) {
     HorizontalDivider()
 }
 
-@Composable
-private fun TimersTab(d: Data, now: Long, open: (Screen) -> Unit) {
-    val ctx = LocalContext.current
-    val cs = MaterialTheme.colorScheme
-    var bigId by remember { mutableStateOf<Int?>(null) }
-    fun shown(t: Timer) = if (t.countUp) t.elapsed(now) else t.stepMs() - t.elapsed(now)
-    Header({ Title("Timers") }) {
-        IconButton({ open(EditT(Timer())) }) { Icon(Icons.Default.Add, "Add", tint = cs.primary) }
-    }
-    if (d.timers.isEmpty()) return Empty("No Timers")
-    LazyColumn {
-        item { Spacer(Modifier.height(20.dp)); HorizontalDivider() }
-        items(d.timers, key = { it.id }) { t ->
-            Row(
-                Modifier.fillMaxWidth().background(cs.surface).clickable { open(EditT(t)) }.padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        fmt(shown(t)), Modifier.clickable { bigId = t.id }, fontSize = 34.sp,
-                        color = if (t.runningSince != null) cs.primary else cs.onSurface,
-                    )
-                    val step = if (t.steps.size > 1 && !t.countUp) "Step ${t.idx + 1}/${t.steps.size}" else null
-                    Text(
-                        listOfNotNull(t.name.ifBlank { "(untitled)" }, step, t.category.ifBlank { null }).joinToString(" · "),
-                        style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
-                    )
-                }
-                if (t.runningSince != null) TextButton({ act(ctx, "pause", "t", t.id) }) { Text("Pause") }
-                else TextButton({ act(ctx, "start", "t", t.id) }) { Text("Start") }
-                TextButton({ act(ctx, "reset", "t", t.id) }) { Text("Reset") }
-            }
-            HorizontalDivider()
-        }
-    }
-    bigId?.let { id ->
-        val t = d.timers.find { it.id == id } ?: return@let
-        Dialog({ bigId = null }) {
-            Text(fmt(shown(t)), Modifier.clickable { bigId = null }, fontSize = 80.sp, color = Color.White)
-        }
-    }
-}
-
 @SuppressLint("BatteryLife")
 @Composable
 private fun SettingsTab(d: Data) {
@@ -656,7 +631,7 @@ private fun SettingsTab(d: Data) {
         AlertDialog(
             { pending = null },
             title = { Text("Replace everything?") },
-            text = { Text("${data.reminders.size} reminders and ${data.timers.size} timers will replace the current data.") },
+            text = { Text("${data.reminders.size} reminders will replace the current data.") },
             confirmButton = {
                 TextButton({
                     Alarms.cancelAll(ctx)
@@ -699,8 +674,6 @@ private fun DeleteRow(label: String, onClick: () -> Unit) {
     )
 }
 
-private fun cancelAlerts(ctx: Context, id: Int) =
-    ctx.getSystemService(NotificationManager::class.java).run { cancel(id); cancel(TIMER_NOTIF + id) }
 
 @Composable
 private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
@@ -746,6 +719,7 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
                 }
             }
             Box(Modifier.background(cs.surface)) { DateTimeWheel(start) { setStart(it) } }
+            TextButton({ dialog = "type" }, Modifier.fillMaxWidth().background(cs.surface)) { Text("Type date and time") }
         }
         HorizontalDivider()
 
@@ -777,7 +751,7 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
         if (r.id != 0) DeleteRow("Delete Reminder") {
             Store.update { d -> d.copy(reminders = d.reminders.filter { it.id != r.id }) }
             Alarms.set(ctx, "r", r.id, null)
-            cancelAlerts(ctx, r.id)
+            ctx.getSystemService(NotificationManager::class.java).cancel(r.id)
             back()
         }
         Spacer(Modifier.height(32.dp))
@@ -840,62 +814,7 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
                 RadioRow(label, r.preMin == m) { r = r.copy(preMin = m) }
             }
         }
+        "type" -> TypeDateDialog(start, close) { setStart(it) }
         else -> {}
-    }
-}
-
-@Composable
-private fun TimerEditor(initial: Timer, back: () -> Unit) {
-    val ctx = LocalContext.current
-    var t by remember { mutableStateOf(initial) }
-    val save = {
-        var saved: Timer? = null
-        Store.update { d ->
-            val id = if (t.id == 0) d.nextId else t.id
-            val x = t.copy(id = id).reset()
-            saved = x
-            d.copy(nextId = maxOf(d.nextId, id + 1), timers = d.timers.filter { it.id != id } + x)
-        }
-        saved?.let { Alarms.sync(ctx, it) }
-        Unit
-    }
-    EditorScaffold(if (t.id == 0) "New Timer" else "Timer", back, save) {
-        Spacer(Modifier.height(24.dp))
-        HorizontalDivider()
-        FieldRow(t.name, "Name") { t = t.copy(name = it) }
-        FieldRow(t.category, "Category") { t = t.copy(category = it) }
-        SwitchRow("Count up (stopwatch)", t.countUp) { t = t.copy(countUp = it) }
-        if (!t.countUp) {
-            SectionHeader(if (t.steps.size > 1) "Queue" else "Duration")
-            Column(Modifier.background(MaterialTheme.colorScheme.surface).padding(16.dp), Arrangement.spacedBy(12.dp)) {
-                t.steps.forEachIndexed { i, s ->
-                    fun set(x: Step) { t = t.copy(steps = t.steps.toMutableList().also { it[i] = x }) }
-                    // key on size so fields re-read their values after a step is removed
-                    androidx.compose.runtime.key(i, t.steps.size) {
-                        if (t.steps.size > 1) Text("Step ${i + 1}", fontWeight = FontWeight.SemiBold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            NumField("h", (s.sec / 3600).toInt(), Modifier.weight(1f)) { set(s.copy(sec = (it.coerceAtMost(999) * 3600L) + s.sec % 3600)) }
-                            NumField("m", (s.sec / 60 % 60).toInt(), Modifier.weight(1f)) { set(s.copy(sec = s.sec - s.sec / 60 % 60 * 60 + it.coerceAtMost(59) * 60L)) }
-                            NumField("s", (s.sec % 60).toInt(), Modifier.weight(1f)) { set(s.copy(sec = s.sec - s.sec % 60 + it.coerceAtMost(59))) }
-                            if (t.steps.size > 1) IconButton({ t = t.copy(steps = t.steps.filterIndexed { j, _ -> j != i }) }) {
-                                Icon(Icons.Default.Close, "Remove step")
-                            }
-                        }
-                        OutlinedTextField(s.msg, { set(s.copy(msg = it)) }, Modifier.fillMaxWidth(), label = { Text("Message") }, singleLine = true)
-                    }
-                }
-                TextButton({ t = t.copy(steps = t.steps + Step()) }) { Text("Add step (queue)") }
-                if (t.steps.size > 1) NumField("Pause between steps, seconds", t.gapSec.toInt()) { t = t.copy(gapSec = it.toLong()) }
-            }
-            SectionHeader("Alarm options")
-            MelodyRow(t.sound) { t = t.copy(sound = it) }
-        }
-        if (t.id != 0) DeleteRow("Delete Timer") {
-            Store.update { d -> d.copy(timers = d.timers.filter { it.id != t.id }) }
-            Alarms.set(ctx, "t", t.id, null)
-            cancelAlerts(ctx, t.id)
-            back()
-        }
-        Spacer(Modifier.height(32.dp))
     }
 }

@@ -61,22 +61,17 @@ class AlertActivity : ComponentActivity() {
             ) {
                 Text(i.getStringExtra("title").orEmpty(), style = MaterialTheme.typography.displaySmall, textAlign = TextAlign.Center)
                 i.getStringExtra("text")?.takeIf { it.isNotBlank() }?.let { Text(it, textAlign = TextAlign.Center) }
-                if (kind == "r") {
-                    Button({ go("done") }, big) { Text("Done") }
-                    Text("Snooze (minutes)")
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(5, 10, 15, 30, 60).forEach {
-                            OutlinedButton({ go("snooze", it) }, Modifier.weight(1f)) { Text("$it") }
-                        }
+                Button({ go("done") }, big) { Text("Done") }
+                Text("Snooze (minutes)")
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(5, 10, 15, 30, 60).forEach {
+                        OutlinedButton({ go("snooze", it) }, Modifier.weight(1f)) { Text("$it") }
                     }
-                    var custom by remember { mutableIntStateOf(20) }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        NumField("Minutes", custom, Modifier.weight(1f)) { custom = it }
-                        Button({ go("snooze", custom.coerceAtLeast(1)) }) { Text("Snooze") }
-                    }
-                } else {
-                    Button({ go("silence") }, big) { Text("Stop") }
-                    OutlinedButton({ go("restart") }, big) { Text("Restart") }
+                }
+                var custom by remember { mutableIntStateOf(20) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NumField("Minutes", custom, Modifier.weight(1f)) { custom = it }
+                    Button({ go("snooze", custom.coerceAtLeast(1)) }) { Text("Snooze") }
                 }
             }
         }

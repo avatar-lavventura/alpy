@@ -82,15 +82,4 @@ class ModelTest {
         r = r.fire(r.fireAt()!!, z).also { assertEquals(Fire.MAIN, it.second) }.first
         assertEquals(ms("2026-10-15T08:45"), r.fireAt())
     }
-
-    @Test fun timerQueueAdvancesWithGap() {
-        var t = Timer(steps = listOf(Step(60), Step(30)), gapSec = 5).start(0)
-        assertEquals(60_000L, t.endAt())
-        t = t.finishStep(60_000)
-        assertEquals(1, t.idx)
-        assertEquals(60_000L + 5_000 + 30_000, t.endAt())
-        t = t.pause(70_000).start(100_000)
-        assertEquals(100_000L + 25_000, t.endAt())
-        assertNull(t.finishStep(125_000).endAt())
-    }
 }
