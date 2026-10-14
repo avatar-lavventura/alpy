@@ -27,11 +27,13 @@ object Updater {
 
     var available by mutableStateOf<Release?>(null)
     var busy by mutableStateOf(false)
+    /** Android's install confirmation, launched by MainActivity (MIUI/HyperOS block it from a receiver). */
+    var confirm by mutableStateOf<Intent?>(null)
 
     fun installed(ctx: Context) = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
 
-    /** Sets [available] when GitHub has a newer build; returns false when the check failed. */
-    suspend fun check(ctx: Context): Boolean = withContext(Dispatchers.IO) {
+    /** Sets [available] when GitHub has a newer build; returns the error message when the check failed. */
+    suspend fun check(ctx: Context): String? = withContext(Dispatchers.IO) {
         runCatching {
             val j = Store.json.parseToJsonElement(URL(API).readText()).jsonObject
             val tag = j["tag_name"]!!.jsonPrimitive.content
@@ -39,7 +41,7 @@ object Updater {
                 .jsonObject["browser_download_url"]!!.jsonPrimitive.content
             val r = Release(tag.substringAfterLast('.').toInt(), tag, url)
             available = r.takeIf { it.code > installed(ctx).longVersionCode }
-        }.isSuccess
+        }.exceptionOrNull()?.let { it.message ?: it.toString() }
     }
 
     suspend fun install(ctx: Context) {
@@ -80,8 +82,8 @@ class UpdateReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, i: Intent) {
         when (i.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                @Suppress("DEPRECATION") val confirm = i.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
-                ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                @Suppress("DEPRECATION")
+                Updater.confirm = i.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
             }
             PackageInstaller.STATUS_SUCCESS -> {}
             else -> Toast.makeText(ctx, "Update failed: ${i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}", Toast.LENGTH_LONG).show()

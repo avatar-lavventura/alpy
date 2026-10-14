@@ -19,6 +19,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -131,14 +134,22 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Alarms.syncAll(this)
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0)
+        lifecycleScope.launch {
+            // Check every time the app comes to the foreground, not only on a cold start.
+            repeatOnLifecycle(Lifecycle.State.RESUMED) { Updater.check(this@MainActivity) }
+        }
         setContent {
             Themed {
                 var screen by remember { mutableStateOf<Screen>(Home) }
                 var tab by rememberSaveable { mutableIntStateOf(0) }
                 var showDone by rememberSaveable { mutableStateOf(false) }
                 val back = { screen = Home }
-                val ctx = LocalContext.current
-                LaunchedEffect(Unit) { Updater.check(ctx) }
+                Updater.confirm?.let { i ->
+                    LaunchedEffect(i) {
+                        Updater.confirm = null
+                        startActivity(i)
+                    }
+                }
                 BackHandler(screen != Home, back)
                 when (val s = screen) {
                     Home -> HomeScreen(tab, { tab = it }, showDone, { showDone = it }) { screen = it }
@@ -704,8 +715,9 @@ private fun SettingsTab(d: Data) {
         NavRow("Version", Updater.installed(ctx).versionName.orEmpty()) {}
         NavRow("Check for updates", if (Updater.busy) "Downloading..." else "") {
             scope.launch {
+                val err = Updater.check(ctx)
                 val msg = when {
-                    !Updater.check(ctx) -> "Could not reach GitHub"
+                    err != null -> "Update check failed: $err"
                     Updater.available == null -> "Alpy is up to date"
                     else -> null
                 }
