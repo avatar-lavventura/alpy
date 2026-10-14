@@ -96,6 +96,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -115,6 +116,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -139,6 +141,8 @@ class MainActivity : ComponentActivity() {
                 var tab by rememberSaveable { mutableIntStateOf(0) }
                 var showDone by rememberSaveable { mutableStateOf(false) }
                 val back = { screen = Home }
+                val ctx = LocalContext.current
+                LaunchedEffect(Unit) { Updater.check(ctx) }
                 BackHandler(screen != Home, back)
                 when (val s = screen) {
                     Home -> HomeScreen(tab, { tab = it }, showDone, { showDone = it }) { screen = it }
@@ -488,11 +492,27 @@ private fun HomeScreen(tab: Int, setTab: (Int) -> Unit, showDone: Boolean, setDo
         }
     }) { pad ->
         Column(Modifier.padding(pad)) {
+            UpdateBanner()
             when (tab) {
                 0 -> RemindersTab(d, now, showDone, setDone, open)
                 else -> SettingsTab(d)
             }
         }
+    }
+}
+
+@Composable
+private fun UpdateBanner() {
+    val r = Updater.available ?: return
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().background(cs.primary).clickable(enabled = !Updater.busy) { scope.launch { Updater.install(ctx) } }
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Text("Update ${r.tag.removePrefix("v")} available", Modifier.weight(1f), color = cs.onPrimary)
+        Text(if (Updater.busy) "Downloading..." else "Install", color = cs.onPrimary, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -615,6 +635,19 @@ private fun SettingsTab(d: Data) {
             "A daily automatic backup goes to Download/Alpy (last 7 kept).", Modifier.padding(16.dp),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        SectionHeader("About")
+        val scope = rememberCoroutineScope()
+        NavRow("Version", Updater.installed(ctx).versionName.orEmpty()) {}
+        NavRow("Check for updates", if (Updater.busy) "Downloading..." else "") {
+            scope.launch {
+                val msg = when {
+                    !Updater.check(ctx) -> "Could not reach GitHub"
+                    Updater.available == null -> "Alpy is up to date"
+                    else -> null
+                }
+                if (msg != null) Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show() else Updater.install(ctx)
+            }
+        }
         SectionHeader("Permissions")
         if (!ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName))
             NavRow("Disable battery optimization", "") { open(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) }
