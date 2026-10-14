@@ -29,6 +29,7 @@ jobs:
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ github.event.head_commit.message }}
         run: |
           cp app/build/outputs/apk/release/app-release.apk alpy.apk
-          gh release create "v1.0.${{ github.run_number }}" alpy.apk --title "Alpy 1.0.${{ github.run_number }}" --notes "${{ github.event.head_commit.message }}"
+          gh release create "v1.0.${{ github.run_number }}" alpy.apk --title "Alpy 1.0.${{ github.run_number }}" --notes "$NOTES"
