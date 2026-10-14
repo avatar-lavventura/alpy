@@ -639,7 +639,7 @@ private fun ReminderRow(r: Reminder, now: Long, onClick: () -> Unit) {
     ) {
         PowerIcon(r.enabled) { act(ctx, if (r.enabled) "off" else "on", "r", r.id) }
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Row(verticalAlignment = Alignment.Bottom) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(whenLabel(t), style = MaterialTheme.typography.titleMedium, color = if (t < now && !r.done) cs.error else cs.onSurface)
                 Text(" (${rel(t - now)})", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
