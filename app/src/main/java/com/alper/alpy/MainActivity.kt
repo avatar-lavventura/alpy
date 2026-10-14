@@ -786,7 +786,10 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
     var picker by remember { mutableStateOf(if (initial.id == 0) "wheel" else "") }
     var more by remember { mutableStateOf(initial.id != 0) }
     var dialog by remember { mutableStateOf<String?>(null) }
-    var presetTaps by remember { mutableIntStateOf(0) }
+    var leadOpen by remember { mutableStateOf(false) }
+    var leadN by remember { mutableIntStateOf(leadSplit(initial.preMin).first) }
+    var leadU by remember { mutableIntStateOf(leadSplit(initial.preMin).second) }
+    fun setLead(n: Int, u: Int) { leadN = n; leadU = u; r = r.copy(preMin = n * leadUnits[u].second) }
     val start = at(r.start)
     fun setStart(t: LocalDateTime) { r = r.copy(start = ms(t)) }
     val save = {
@@ -852,11 +855,18 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
             SwitchRow("Sound", r.soundOn) { r = r.copy(soundOn = it) }
 
             SectionHeader("Pre-alarm options")
-            val lead = r.start - r.preMin * 60_000L
-            NavRow(
-                "Lead Time", if (r.preMin > 0) at(lead).format(longFmt) else "Off",
-                if (r.preMin > 0 && lead < System.currentTimeMillis()) cs.error else cs.onSurfaceVariant,
-            ) { dialog = "lead" }
+            Row(Modifier.fillMaxWidth().background(cs.surface).clickable { leadOpen = !leadOpen }.padding(16.dp)) {
+                Text("Lead Time", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                Text(leadLabel(r.preMin), color = if (leadOpen) cs.primary else cs.onSurface, style = MaterialTheme.typography.bodyLarge)
+            }
+            if (leadOpen) {
+                Row(Modifier.fillMaxWidth().background(cs.surface).padding(horizontal = 48.dp)) {
+                    Wheel((1..120).map { "$it" }, leadN - 1, Modifier.weight(1f)) { setLead(it + 1, leadU) }
+                    Wheel(leadUnits.map { it.first }, leadU, Modifier.weight(2f)) { setLead(leadN, it) }
+                }
+            }
+            HorizontalDivider()
+            if (r.preMin > 0) MelodyRow(r.preSound) { r = r.copy(preSound = it) }
 
             SectionHeader("Category")
             FieldRow(r.category, "None") { r = r.copy(category = it) }
@@ -915,27 +925,6 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
                     TimeButton("To", to) { r = r.copy(windowTo = it) }
                 }
                 Weekdays(r.weekdays) { r = r.copy(weekdays = it) }
-            }
-        }
-        "lead" -> OptionsDialog("Lead Time", close) {
-            Text("An early warning before the alarm.")
-            listOf(0, 5, 10, 15, 30, 60, 120, 1440).forEach { m ->
-                val label = when {
-                    m == 0 -> "Off"
-                    m < 60 -> "$m minutes before"
-                    m == 60 -> "1 hour before"
-                    m < 1440 -> "${m / 60} hours before"
-                    else -> "1 day before"
-                }
-                RadioRow(label, r.preMin == m) { r = r.copy(preMin = m); presetTaps++ }
-            }
-            Text("Or enter it:")
-            // re-keyed on preset taps so the fields show the chosen preset
-            androidx.compose.runtime.key(presetTaps) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    NumField("Hours", r.preMin / 60, Modifier.weight(1f)) { r = r.copy(preMin = it.coerceAtMost(999) * 60 + r.preMin % 60) }
-                    NumField("Minutes", r.preMin % 60, Modifier.weight(1f)) { r = r.copy(preMin = r.preMin / 60 * 60 + it.coerceAtMost(59)) }
-                }
             }
         }
         "type" -> TypeDateDialog(start, close) { setStart(it) }

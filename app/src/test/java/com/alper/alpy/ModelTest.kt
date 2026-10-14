@@ -82,4 +82,12 @@ class ModelTest {
         r = r.fire(r.fireAt()!!, z).also { assertEquals(Fire.MAIN, it.second) }.first
         assertEquals(ms("2026-10-15T08:45"), r.fireAt())
     }
+
+    @Test fun leadLabels() {
+        assertEquals("Off", leadLabel(0))
+        assertEquals("5 Hours", leadLabel(300))
+        assertEquals("1 Day", leadLabel(1440))
+        assertEquals("90 Minutes", leadLabel(90))
+        assertEquals(2 to 4, leadSplit(20160))
+    }
 }

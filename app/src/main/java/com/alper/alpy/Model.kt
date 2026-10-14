@@ -36,6 +36,7 @@ data class Reminder(
     val windowFrom: Int? = null,         // minute of day; DayMinder window for MINUTES/HOURS
     val windowTo: Int? = null,
     val preMin: Int = 0,
+    val preSound: String? = null,        // pre-alarm melody, null = same as the alarm
     val nag: Boolean = false,
     val nagEveryMin: Int = 5,
     val nagTimes: Int = 0,               // 0 = until done
@@ -47,6 +48,19 @@ data class Reminder(
     val nagCount: Int = 0,
     val activeSince: Long? = null,       // fired and waiting for Done
 )
+
+/** Lead time wheel units; index 0 ("-") means no pre-alarm. */
+val leadUnits = listOf("-" to 0, "Minutes" to 1, "Hours" to 60, "Days" to 1440, "Weeks" to 10080)
+
+/** Minutes -> (count, unit index), using the largest unit that divides evenly. */
+fun leadSplit(min: Int): Pair<Int, Int> {
+    val u = leadUnits.indexOfLast { it.second > 0 && min > 0 && min % it.second == 0 }.coerceAtLeast(0)
+    return (if (u == 0) 1 else min / leadUnits[u].second) to u
+}
+
+fun leadLabel(min: Int) = leadSplit(min).let { (n, u) ->
+    if (u == 0) "Off" else "$n " + leadUnits[u].first.let { if (n == 1) it.dropLast(1) else it }
+}
 
 /** First occurrence strictly after [after], or null when there is none. */
 fun Reminder.occurrenceAfter(after: Long, zone: ZoneId = ZoneId.systemDefault()): Long? {

@@ -77,7 +77,7 @@ fun act(ctx: Context, action: String, kind: String, id: Int, min: Int = Store.da
     } ?: return
     Alarms.sync(ctx, r)
     when (ev) {
-        Fire.PRE -> Alerts.show(ctx, "r", id, "Soon: ${r.title}", "In ${r.preMin} min", r.sound, r.fullScreen, r.snoozeMin, !r.soundOn)
+        Fire.PRE -> Alerts.show(ctx, "r", id, "Soon: ${r.title}", "In ${leadLabel(r.preMin).lowercase()}", r.preSound ?: r.sound, r.fullScreen, r.snoozeMin, !r.soundOn)
         Fire.MAIN, Fire.NAG -> Alerts.show(ctx, "r", id, r.title, r.notes, r.sound, r.fullScreen, r.snoozeMin, !r.soundOn)
         null -> {}
     }
