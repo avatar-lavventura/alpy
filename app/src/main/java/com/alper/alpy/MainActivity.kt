@@ -58,9 +58,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.DisplayMode
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -81,11 +78,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TimeInput
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -120,8 +115,9 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.YearMonth
 import java.time.ZoneId
-import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 
@@ -163,6 +159,8 @@ fun Themed(content: @Composable () -> Unit) {
             primary = Color(0xFF4CC264), onPrimary = Color.White, background = Color.Black, surface = s,
             surfaceContainer = s, surfaceContainerLow = s, surfaceContainerHigh = s, surfaceContainerHighest = Color(0xFF3A3A3C),
             secondaryContainer = Color(0xFF1E4D27), onSecondaryContainer = Color.White,
+            primaryContainer = Color(0xFF1E4D27), onPrimaryContainer = Color.White,
+            tertiaryContainer = Color(0xFF1E4D27), onTertiaryContainer = Color.White,
         )
     } else {
         val s = Color.White
@@ -170,6 +168,8 @@ fun Themed(content: @Composable () -> Unit) {
             primary = Green, onPrimary = Color.White, background = Color(0xFFEFF0EF), surface = s,
             surfaceContainer = s, surfaceContainerLow = s, surfaceContainerHigh = s, surfaceContainerHighest = Color(0xFFE3E5E3),
             secondaryContainer = Color(0xFFD5EFD9), onSecondaryContainer = Color.Black,
+            primaryContainer = Color(0xFFD5EFD9), onPrimaryContainer = Color.Black,
+            tertiaryContainer = Color(0xFFD5EFD9), onTertiaryContainer = Color.Black,
         )
     }
     MaterialTheme(colorScheme = scheme, content = content)
@@ -377,27 +377,91 @@ private fun TimeButton(label: String, minutes: Int, onPick: (Int) -> Unit) {
     }
 }
 
-/** Date and time typed on the keyboard (date field follows the phone's locale format). */
-@OptIn(ExperimentalMaterial3Api::class)
+private val typedDate = DateTimeFormatter.ofPattern("d.M.uuuu")
+private val typedTime = DateTimeFormatter.ofPattern("H:mm")
+
+/** Date and time typed on the keyboard: 11.06.2026 and 20:52 (/ and - work as date separators too). */
 @Composable
 private fun TypeDateDialog(value: LocalDateTime, close: () -> Unit, onPick: (LocalDateTime) -> Unit) {
-    val ds = rememberDatePickerState(
-        initialSelectedDateMillis = value.toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-        initialDisplayMode = DisplayMode.Input,
-    )
-    val ts = rememberTimePickerState(value.hour, value.minute, true)
-    DatePickerDialog(
+    var date by remember { mutableStateOf(value.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))) }
+    var time by remember { mutableStateOf(value.format(typedTime)) }
+    val d = runCatching { LocalDate.parse(date.trim().replace('/', '.').replace('-', '.'), typedDate) }.getOrNull()
+    val t = runCatching { LocalTime.parse(time.trim().replace('.', ':'), typedTime) }.getOrNull()
+    val keys = KeyboardOptions(keyboardType = KeyboardType.Number)
+    AlertDialog(
         close,
-        confirmButton = {
-            TextButton({
-                ds.selectedDateMillis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate().atTime(ts.hour, ts.minute)) }
-                close()
-            }) { Text("OK") }
+        title = { Text("Date and time") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(date, { date = it }, label = { Text("Date (day.month.year)") }, singleLine = true, isError = d == null, keyboardOptions = keys)
+                OutlinedTextField(time, { time = it }, label = { Text("Time (hour:minute)") }, singleLine = true, isError = t == null, keyboardOptions = keys)
+            }
         },
+        confirmButton = { TextButton({ onPick(d!!.atTime(t!!)); close() }, enabled = d != null && t != null) { Text("OK") } },
         dismissButton = { TextButton(close) { Text("Cancel") } },
-    ) {
-        DatePicker(ds)
-        TimeInput(ts, Modifier.align(Alignment.CenterHorizontally).padding(16.dp))
+    )
+}
+
+/** Month grid like Alarmed's calendar: today in red, weekends grey, selected day filled. */
+@Composable
+private fun MonthCalendar(selected: LocalDate, onPick: (LocalDate) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val today = remember { LocalDate.now() }
+    val months = remember { (-1L..24L).map { YearMonth.from(today).plusMonths(it) } }
+    val state = rememberLazyListState(months.indexOf(YearMonth.from(selected)).coerceAtLeast(0))
+    val title = DateTimeFormatter.ofPattern("MMMM yyyy")
+    Column(Modifier.background(cs.surface).padding(horizontal = 16.dp)) {
+        Row {
+            listOf("M", "T", "W", "T", "F", "S", "S").forEachIndexed { i, n ->
+                Text(n, Modifier.weight(1f).padding(vertical = 4.dp), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall,
+                    color = if (i >= 5) cs.onSurfaceVariant else cs.onSurface)
+            }
+        }
+        HorizontalDivider()
+        LazyColumn(Modifier.height(360.dp), state) {
+            items(months) { ym ->
+                Text(ym.format(title), Modifier.fillMaxWidth().padding(vertical = 6.dp), color = cs.primary, textAlign = TextAlign.Center)
+                val cells = List<LocalDate?>(ym.atDay(1).dayOfWeek.value - 1) { null } + (1..ym.lengthOfMonth()).map { ym.atDay(it) }
+                cells.chunked(7).forEach { week ->
+                    Row {
+                        for (i in 0 until 7) Box(Modifier.weight(1f).height(46.dp), contentAlignment = Alignment.Center) {
+                            val day = week.getOrNull(i) ?: return@Box
+                            val sel = day == selected
+                            Box(
+                                Modifier.size(40.dp).clip(CircleShape)
+                                    .background(if (!sel) Color.Transparent else if (day == today) cs.error else cs.primary)
+                                    .clickable { onPick(day) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "${day.dayOfMonth}", fontSize = 19.sp, fontWeight = if (day == today) FontWeight.Bold else null,
+                                    color = when {
+                                        sel -> Color.White
+                                        day == today -> cs.error
+                                        day.dayOfWeek.value >= 6 -> cs.onSurfaceVariant
+                                        else -> cs.onSurface
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider(Modifier.padding(top = 4.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ButtonStrip(labels: List<String>, onClick: (Int) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.background(cs.surface).border(1.dp, cs.primary)) {
+        labels.forEachIndexed { i, label ->
+            Text(
+                label, Modifier.weight(1f).border(0.5.dp, cs.primary).clickable { onClick(i) }.padding(vertical = 10.dp),
+                color = cs.primary, textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -713,7 +777,8 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     var r by remember { mutableStateOf(initial) }
-    var wheel by remember { mutableStateOf(initial.id == 0) }
+    var picker by remember { mutableStateOf(if (initial.id == 0) "wheel" else "") }
+    var more by remember { mutableStateOf(initial.id != 0) }
     var dialog by remember { mutableStateOf<String?>(null) }
     val start = at(r.start)
     fun setStart(t: LocalDateTime) { r = r.copy(start = ms(t)) }
@@ -733,53 +798,64 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
         Spacer(Modifier.height(24.dp))
         HorizontalDivider()
         FieldRow(r.title, "Title") { r = r.copy(title = it) }
-        Row(Modifier.fillMaxWidth().background(cs.surface).clickable { wheel = !wheel }.padding(16.dp)) {
+        Row(Modifier.fillMaxWidth().background(cs.surface).clickable { picker = if (picker == "") "wheel" else "" }.padding(16.dp)) {
             Text("Alarm", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            Text(start.format(longFmt), color = if (wheel) cs.primary else cs.onSurface, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                start.format(longFmt), style = MaterialTheme.typography.bodyLarge,
+                color = if (r.start <= System.currentTimeMillis()) cs.error else if (picker != "") cs.primary else cs.onSurface,
+            )
         }
-        if (wheel) {
-            Row(Modifier.background(cs.surface).border(1.dp, cs.primary)) {
-                listOf(7, 12, 17, 21).forEach { h ->
-                    Text(
-                        "%02d:00".format(h),
-                        Modifier.weight(1f).border(0.5.dp, cs.primary).clickable {
-                            var t = start.toLocalDate().atTime(h, 0)
-                            if (t < LocalDateTime.now()) t = t.plusDays(1)
-                            setStart(t)
-                        }.padding(vertical = 10.dp),
-                        color = cs.primary, textAlign = TextAlign.Center,
-                    )
-                }
+        if (picker == "wheel") {
+            ButtonStrip(listOf("07:00", "12:00", "17:00", "21:00")) { i ->
+                var t = start.toLocalDate().atTime(listOf(7, 12, 17, 21)[i], 0)
+                if (t < LocalDateTime.now()) t = t.plusDays(1)
+                setStart(t)
             }
             Box(Modifier.background(cs.surface)) { DateTimeWheel(start) { setStart(it) } }
+            ButtonStrip(listOf("Today", "+3 Hours", "+1 Week", "Calendar")) { i ->
+                when (i) {
+                    0 -> setStart(LocalDate.now().atTime(start.toLocalTime()))
+                    1 -> setStart(start.plusHours(3))
+                    2 -> setStart(start.plusWeeks(1))
+                    else -> picker = "calendar"
+                }
+            }
             TextButton({ dialog = "type" }, Modifier.fillMaxWidth().background(cs.surface)) { Text("Type date and time") }
         }
+        if (picker == "calendar") MonthCalendar(start.toLocalDate()) { setStart(it.atTime(start.toLocalTime())); picker = "wheel" }
         HorizontalDivider()
 
-        SectionHeader("Do-it / Delay-it options")
-        NavRow("Nag-Me", if (r.nag) "Every ${r.nagEveryMin} min" else "(Off)") { dialog = "nag" }
-        NavRow("Actionable Snooze", "(${r.snoozeMin} min)") { dialog = "snooze" }
+        if (!more) {
+            TextButton({ more = true; picker = "" }, Modifier.fillMaxWidth().background(cs.surface).padding(vertical = 4.dp)) {
+                Text("More Options", fontSize = 20.sp)
+            }
+            HorizontalDivider()
+        } else {
+            SectionHeader("Do-it / Delay-it options")
+            NavRow("Nag-Me", if (r.nag) "Every ${r.nagEveryMin} min" else "(Off)") { dialog = "nag" }
+            NavRow("Actionable Snooze", "(${r.snoozeMin} min)") { dialog = "snooze" }
 
-        SectionHeader("Repeat options")
-        NavRow("Repeat", if (r.windowFrom != null) "DayMinder" else r.describe()) { dialog = "repeat" }
-        NavRow("DayMinder", r.windowFrom?.let { "${hm(it)}-${hm(r.windowTo ?: it)}" } ?: "Off") { dialog = "dayminder" }
+            SectionHeader("Repeat options")
+            NavRow("Repeat", if (r.windowFrom != null) "DayMinder" else r.describe()) { dialog = "repeat" }
+            NavRow("DayMinder", r.windowFrom?.let { "${hm(it)}-${hm(r.windowTo ?: it)}" } ?: "Off") { dialog = "dayminder" }
 
-        SectionHeader("Alarm options")
-        MelodyRow(r.sound) { r = r.copy(sound = it) }
-        SwitchRow("Alert Message", r.fullScreen) { r = r.copy(fullScreen = it) }
-        SwitchRow("Sound", r.soundOn) { r = r.copy(soundOn = it) }
+            SectionHeader("Alarm options")
+            MelodyRow(r.sound) { r = r.copy(sound = it) }
+            SwitchRow("Alert Message", r.fullScreen) { r = r.copy(fullScreen = it) }
+            SwitchRow("Sound", r.soundOn) { r = r.copy(soundOn = it) }
 
-        SectionHeader("Pre-alarm options")
-        val lead = r.start - r.preMin * 60_000L
-        NavRow(
-            "Lead Time", if (r.preMin > 0) at(lead).format(longFmt) else "Off",
-            if (r.preMin > 0 && lead < System.currentTimeMillis()) cs.error else cs.onSurfaceVariant,
-        ) { dialog = "lead" }
+            SectionHeader("Pre-alarm options")
+            val lead = r.start - r.preMin * 60_000L
+            NavRow(
+                "Lead Time", if (r.preMin > 0) at(lead).format(longFmt) else "Off",
+                if (r.preMin > 0 && lead < System.currentTimeMillis()) cs.error else cs.onSurfaceVariant,
+            ) { dialog = "lead" }
 
-        SectionHeader("Category")
-        FieldRow(r.category, "None") { r = r.copy(category = it) }
-        SectionHeader("Notes")
-        FieldRow(r.notes, "", minLines = 4) { r = r.copy(notes = it) }
+            SectionHeader("Category")
+            FieldRow(r.category, "None") { r = r.copy(category = it) }
+            SectionHeader("Notes")
+            FieldRow(r.notes, "", minLines = 4) { r = r.copy(notes = it) }
+        }
 
         if (r.id != 0) DeleteRow("Delete Reminder") {
             Store.update { d -> d.copy(reminders = d.reminders.filter { it.id != r.id }) }
