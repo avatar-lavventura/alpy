@@ -144,12 +144,6 @@ class MainActivity : ComponentActivity() {
                 var tab by rememberSaveable { mutableIntStateOf(0) }
                 var showDone by rememberSaveable { mutableStateOf(false) }
                 val back = { screen = Home }
-                Updater.confirm?.let { i ->
-                    LaunchedEffect(i) {
-                        Updater.confirm = null
-                        startActivity(i)
-                    }
-                }
                 BackHandler(screen != Home, back)
                 when (val s = screen) {
                     Home -> HomeScreen(tab, { tab = it }, showDone, { showDone = it }) { screen = it }
@@ -583,11 +577,11 @@ private fun UpdateBanner() {
     val scope = rememberCoroutineScope()
     val cs = MaterialTheme.colorScheme
     Row(
-        Modifier.fillMaxWidth().background(cs.primary).clickable(enabled = !Updater.busy) { scope.launch { Updater.install(ctx) } }
+        Modifier.fillMaxWidth().background(cs.primary).clickable { scope.launch { Updater.install(ctx) } }
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Text("Update ${r.tag.removePrefix("v")} available", Modifier.weight(1f), color = cs.onPrimary)
-        Text(if (Updater.busy) "Downloading..." else "Install", color = cs.onPrimary, fontWeight = FontWeight.Bold)
+        Text(Updater.progress?.let { "Downloading $it%" } ?: "Install", color = cs.onPrimary, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -713,7 +707,7 @@ private fun SettingsTab(d: Data) {
         SectionHeader("About")
         val scope = rememberCoroutineScope()
         NavRow("Version", Updater.installed(ctx).versionName.orEmpty()) {}
-        NavRow("Check for updates", if (Updater.busy) "Downloading..." else "") {
+        NavRow("Check for updates", Updater.progress?.let { "Downloading $it%" } ?: "") {
             scope.launch {
                 val err = Updater.check(ctx)
                 val msg = when {

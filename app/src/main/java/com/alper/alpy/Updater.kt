@@ -1,22 +1,21 @@
 package com.alper.alpy
 
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageInstaller
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.File
+import java.net.HttpURLConnection
 import java.net.URL
 
 /** Self-update from the latest GitHub release (tag v1.0.<versionCode>, asset alpy.apk). */
@@ -26,16 +25,20 @@ object Updater {
     data class Release(val code: Int, val tag: String, val url: String)
 
     var available by mutableStateOf<Release?>(null)
-    var busy by mutableStateOf(false)
-    /** Android's install confirmation, launched by MainActivity (MIUI/HyperOS block it from a receiver). */
-    var confirm by mutableStateOf<Intent?>(null)
+    /** Download progress 0..100 while downloading, else null. */
+    var progress by mutableStateOf<Int?>(null)
 
     fun installed(ctx: Context) = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+
+    private fun open(url: String) = (URL(url).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 15_000
+        readTimeout = 30_000
+    }
 
     /** Sets [available] when GitHub has a newer build; returns the error message when the check failed. */
     suspend fun check(ctx: Context): String? = withContext(Dispatchers.IO) {
         runCatching {
-            val j = Store.json.parseToJsonElement(URL(API).readText()).jsonObject
+            val j = Store.json.parseToJsonElement(open(API).inputStream.use { it.readBytes().decodeToString() }).jsonObject
             val tag = j["tag_name"]!!.jsonPrimitive.content
             val url = j["assets"]!!.jsonArray.first { "alpy.apk" in it.toString() }
                 .jsonObject["browser_download_url"]!!.jsonPrimitive.content
@@ -44,49 +47,45 @@ object Updater {
         }.exceptionOrNull()?.let { it.message ?: it.toString() }
     }
 
+    /** Downloads the APK, then opens Android's normal installer (the same path a browser download uses). */
     suspend fun install(ctx: Context) {
         val r = available ?: return
+        if (progress != null) return
         if (!ctx.packageManager.canRequestPackageInstalls()) {
             Toast.makeText(ctx, "Allow Alpy to install updates, then tap Install again", Toast.LENGTH_LONG).show()
             ctx.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}")))
             return
         }
-        busy = true
+        progress = 0
+        val apk = File(ctx.cacheDir, "update/alpy.apk")
         try {
             withContext(Dispatchers.IO) {
-                val pi = ctx.packageManager.packageInstaller
-                val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-                // Silent once Alpy installed itself before (Android 12+); otherwise Android asks once.
-                if (Build.VERSION.SDK_INT >= 31) params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-                val id = pi.createSession(params)
-                pi.openSession(id).use { s ->
-                    URL(r.url).openStream().use { input ->
-                        s.openWrite("alpy.apk", 0, -1).use { out -> input.copyTo(out); s.fsync(out) }
+                apk.parentFile!!.mkdirs()
+                val c = open(r.url)
+                val total = c.contentLengthLong
+                c.inputStream.use { input ->
+                    apk.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        var done = 0L
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            done += n
+                            if (total > 0) progress = (done * 100 / total).toInt()
+                        }
                     }
-                    val done = PendingIntent.getBroadcast(
-                        ctx, 0, Intent(ctx, UpdateReceiver::class.java),
-                        PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                    )
-                    s.commit(done.intentSender)
                 }
             }
+            val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.update", apk)
+            ctx.startActivity(
+                Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            )
         } catch (e: Exception) {
-            Toast.makeText(ctx, "Update failed: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, "Update failed: ${e.message ?: e}", Toast.LENGTH_LONG).show()
         } finally {
-            busy = false
-        }
-    }
-}
-
-class UpdateReceiver : BroadcastReceiver() {
-    override fun onReceive(ctx: Context, i: Intent) {
-        when (i.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
-            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                @Suppress("DEPRECATION")
-                Updater.confirm = i.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
-            }
-            PackageInstaller.STATUS_SUCCESS -> {}
-            else -> Toast.makeText(ctx, "Update failed: ${i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}", Toast.LENGTH_LONG).show()
+            progress = null
         }
     }
 }
