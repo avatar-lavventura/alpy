@@ -1,0 +1,58 @@
+#+TITLE: Alpy
+
+A reminder and nagging alarm app for Android, styled after Alarmed. Each reminder rings at its time, can warn you ahead of time, and keeps nagging until you mark it done.
+
+* Features
+
+- One-off or repeating reminders: every N minutes, hours, days, weeks, months or years
+- Weekday filter (for example, Mon to Fri only)
+- Daily window for minute/hour repeats (for example, every 30 minutes between 09:00 and 18:00)
+- Pre-alarm lead time (minutes, hours, days or weeks) with its own melody
+- Nagging: re-alert every N minutes, for a fixed count, for a fixed duration, or until done
+- Snooze, quick adjust buttons (-5m to +1d), and a per-reminder on/off switch
+- Full screen alert over the lock screen, custom sound, vibration
+- Alarms survive reboot, time change, timezone change and app update
+- Daily JSON backup to =Download/Alpy/= (keeps the newest 7, survives uninstall)
+- Self-update from the latest GitHub release
+
+* Install
+
+Download =alpy.apk= from the [[https://github.com/avatar-lavventura/alpy/releases/latest][latest release]] and open it on the phone. Requires Android 10 (API 29) or newer.
+
+After that, the app checks GitHub for a newer build on every resume and offers to install it. Android asks once for permission to install unknown apps.
+
+For reliable alarms, allow notifications, full screen intents, and exclude Alpy from battery optimization.
+
+* Build
+
+Needs JDK 17 and Gradle 8.10.
+
+#+begin_src sh
+gradle testReleaseUnitTest assembleRelease
+#+end_src
+
+The APK lands in =app/build/outputs/apk/release/app-release.apk=. Without =KEYSTORE_FILE= set, it is signed with the debug key.
+
+* Release
+
+Every push to =main= runs [[file:.github/workflows/build.yml][the build workflow]]: it runs the unit tests, builds a signed APK, and publishes it as release =v1.0.<run number>= with the commit message as release notes. The version code equals the run number, which is what the in-app updater compares against.
+
+Required repository secrets:
+
+| Secret              | Content                             |
+|---------------------+-------------------------------------|
+| =KEYSTORE_B64=      | Base64 of the release keystore      |
+| =KEYSTORE_PASSWORD= | Store and key password (alias =nagger=) |
+
+* Layout
+
+| File               | Role                                                          |
+|--------------------+---------------------------------------------------------------|
+| =Model.kt=         | Reminder data and pure scheduling logic (next occurrence, nag, snooze) |
+| =Engine.kt=        | AlarmManager scheduling, receivers, notifications, alert sound service |
+| =Store.kt=         | JSON persistence and daily backup                             |
+| =MainActivity.kt=  | Compose UI: list, editor, pickers                             |
+| =AlertActivity.kt= | Full screen alert                                             |
+| =Updater.kt=       | GitHub release check, download and install                    |
+
+Sources are under =app/src/main/java/com/alper/alpy/=. Scheduling logic is tested in =app/src/test/java/com/alper/alpy/ModelTest.kt=.
