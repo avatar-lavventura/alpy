@@ -2,6 +2,7 @@ name: build
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -18,15 +19,22 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.10.2
+          gradle-version: 8.14.3
+      # pull requests only check that it builds and the tests pass: no signing secrets, no release
+      - name: Test and build (pull request)
+        if: github.event_name == 'pull_request'
+        run: gradle --no-daemon testReleaseUnitTest assembleRelease
       - name: Keystore
+        if: github.event_name != 'pull_request'
         run: echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
       - name: Test and build
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_FILE: ${{ runner.temp }}/release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: gradle --no-daemon testReleaseUnitTest assembleRelease
       - name: Release
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           NOTES: ${{ github.event.head_commit.message }}

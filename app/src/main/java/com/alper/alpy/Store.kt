@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.core.util.AtomicFile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -15,15 +16,16 @@ object Store {
     val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
     val data = MutableStateFlow(Data())
     private lateinit var app: Context
-    private val file get() = File(app.filesDir, "data.json")
+    // AtomicFile syncs to disk before replacing, so a crash or power cut leaves the old file or the new one, never an empty one
+    private val file get() = AtomicFile(File(app.filesDir, "data.json"))
 
     fun init(ctx: Context) {
         app = ctx
-        if (!file.exists()) return
+        if (!file.baseFile.exists()) return
         data.value = try {
-            json.decodeFromString<Data>(file.readText())
+            json.decodeFromString<Data>(file.readFully().decodeToString())
         } catch (e: Exception) {
-            file.copyTo(File(app.filesDir, "data.bad-${System.currentTimeMillis()}.json"))
+            file.baseFile.copyTo(File(app.filesDir, "data.bad-${System.currentTimeMillis()}.json"))
             Data()
         }
     }
@@ -32,9 +34,15 @@ object Store {
     fun update(f: (Data) -> Data): Data {
         val d = f(data.value)
         data.value = d
-        val tmp = File(app.filesDir, "data.tmp")
-        tmp.writeText(json.encodeToString(Data.serializer(), d))
-        tmp.renameTo(file)
+        val af = file
+        val out = af.startWrite()
+        try {
+            out.write(json.encodeToString(Data.serializer(), d).toByteArray())
+            af.finishWrite(out)
+        } catch (e: Exception) {
+            af.failWrite(out)
+            throw e
+        }
         dailyBackup(d)
         return d
     }

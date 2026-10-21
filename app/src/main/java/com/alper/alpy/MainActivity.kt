@@ -548,7 +548,7 @@ private fun MelodyRow(uri: String?, onPick: (String?) -> Unit) {
 private fun HomeScreen(tab: Int, setTab: (Int) -> Unit, showDone: Boolean, setDone: (Boolean) -> Unit, open: (Screen) -> Unit) {
     val d by Store.data.collectAsState()
     val now by produceState(System.currentTimeMillis()) {
-        while (true) { delay(250); value = System.currentTimeMillis() }
+        while (true) { delay(1_000); value = System.currentTimeMillis() } // labels show minutes; each tick redraws the list
     }
     val cs = MaterialTheme.colorScheme
     Scaffold(containerColor = cs.background, bottomBar = {
@@ -796,7 +796,8 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
         val now = System.currentTimeMillis()
         var saved: Reminder? = null
         Store.update { d ->
-            val id = if (r.id == 0) d.nextId else r.id
+            // past every existing id too, so an imported file with a stale nextId cannot make a new reminder replace an old one
+            val id = if (r.id == 0) maxOf(d.nextId, (d.reminders.maxOfOrNull { it.id } ?: 0) + 1) else r.id
             val x = r.copy(id = id, done = false).rescheduled(now)
             saved = x
             d.copy(nextId = maxOf(d.nextId, id + 1), reminders = d.reminders.filter { it.id != id } + x)

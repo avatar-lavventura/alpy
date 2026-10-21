@@ -21,6 +21,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
+import java.time.ZoneId
 
 private const val FLAGS = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
 private const val ICON = android.R.drawable.ic_lock_idle_alarm
@@ -98,7 +99,11 @@ object Alarms {
 
     fun sync(ctx: Context, r: Reminder) = set(ctx, "r", r.id, r.fireAt())
 
-    fun syncAll(ctx: Context) = Store.data.value.reminders.forEach { sync(ctx, it) }
+    fun syncAll(ctx: Context) {
+        val zone = ZoneId.systemDefault()
+        if (Store.data.value.zone != zone.id) Store.update { it.inZone(zone) }
+        Store.data.value.reminders.forEach { sync(ctx, it) }
+    }
 
     fun cancelAll(ctx: Context) {
         Store.data.value.reminders.forEach { set(ctx, "r", it.id, null) }
@@ -116,7 +121,7 @@ object Alerts {
     ) {
         val screen = PendingIntent.getActivity(ctx, id, Intent(ctx, AlertActivity::class.java)
             .putExtra("kind", kind).putExtra("id", id).putExtra("title", title).putExtra("text", text), FLAGS)
-        val n = Notification.Builder(ctx, if (full) "alerts" else if (quiet) "quiet" else "reminders")
+        fun build(channel: String) = Notification.Builder(ctx, channel)
             .setSmallIcon(ICON).setContentTitle(title).setContentText(text)
             .setCategory(Notification.CATEGORY_ALARM).setContentIntent(screen)
             .apply { if (full) setFullScreenIntent(screen, true) }
@@ -126,13 +131,14 @@ object Alerts {
         if (full) {
             try {
                 ctx.startForegroundService(Intent(ctx, AlertService::class.java)
-                    .putExtra("id", id).putExtra("sound", sound).putExtra("quiet", quiet).putExtra("n", n))
+                    .putExtra("id", id).putExtra("sound", sound).putExtra("quiet", quiet).putExtra("n", build("alerts")))
                 return
             } catch (e: Exception) {
                 // Background start refused (e.g. inexact fallback alarm): plain notification below.
             }
         }
-        nm(ctx).notify(id, n)
+        // not "alerts": that channel is silent because AlertService plays the sound
+        nm(ctx).notify(id, build(if (quiet) "quiet" else "reminders"))
     }
 }
 

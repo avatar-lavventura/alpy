@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.ZoneOffset
 
 class ModelTest {
@@ -41,6 +42,31 @@ class ModelTest {
         assertEquals("2026-10-14T09:00", r.after("2026-10-14T03:00"))
         assertEquals("2026-10-14T21:00", r.after("2026-10-14T19:30"))
         assertEquals("2026-10-15T09:00", r.after("2026-10-14T21:00"))
+    }
+
+    @Test fun dayMinderPastMidnight() {
+        val r = Reminder(start = ms("2026-10-14T00:00"), rule = Every.MINUTES, every = 120, windowFrom = 22 * 60, windowTo = 6 * 60)
+        assertEquals("2026-10-14T22:00", r.after("2026-10-14T03:00"))
+        assertEquals("2026-10-15T00:00", r.after("2026-10-14T23:00"))
+        assertEquals("2026-10-15T04:00", r.after("2026-10-15T03:00"))
+        assertEquals("2026-10-15T06:00", r.after("2026-10-15T05:30"))
+        assertEquals("2026-10-15T22:00", r.after("2026-10-15T06:00"))
+    }
+
+    @Test fun zoneChangeKeepsLocalTime() {
+        val ist = ZoneId.of("Europe/Istanbul")
+        val lon = ZoneId.of("Europe/London")
+        fun at(s: String, z: ZoneId) = LocalDateTime.parse(s).atZone(z).toInstant().toEpochMilli()
+        val r = Reminder(id = 1, start = at("2026-10-14T09:00", ist), rule = Every.DAYS, nextAt = at("2026-10-15T09:00", ist), nagAt = 123)
+        val d = Data(reminders = listOf(r), zone = ist.id).inZone(lon)
+        val x = d.reminders.single()
+        assertEquals(lon.id, d.zone)
+        assertEquals(at("2026-10-14T09:00", lon), x.start)
+        assertEquals(at("2026-10-15T09:00", lon), x.nextAt)
+        assertEquals(123L, x.nagAt)
+        assertEquals(at("2026-10-16T09:00", lon), x.occurrenceAfter(x.nextAt!!, lon))
+        // first run records the zone without moving anything
+        assertEquals(Data(reminders = listOf(r), zone = lon.id), Data(reminders = listOf(r)).inZone(lon))
     }
 
     @Test fun nagUntilLimitThenStops() {
