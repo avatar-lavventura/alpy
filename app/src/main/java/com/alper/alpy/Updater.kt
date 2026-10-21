@@ -40,7 +40,7 @@ object Updater {
         runCatching {
             val j = Store.json.parseToJsonElement(open(API).inputStream.use { it.readBytes().decodeToString() }).jsonObject
             val tag = j["tag_name"]!!.jsonPrimitive.content
-            val url = j["assets"]!!.jsonArray.first { "alpy.apk" in it.toString() }
+            val url = j["assets"]!!.jsonArray.first { it.jsonObject["name"]?.jsonPrimitive?.content == "alpy.apk" }
                 .jsonObject["browser_download_url"]!!.jsonPrimitive.content
             val r = Release(tag.substringAfterLast('.').toInt(), tag, url)
             available = r.takeIf { it.code > installed(ctx).longVersionCode }

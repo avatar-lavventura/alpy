@@ -73,11 +73,13 @@ fun Reminder.occurrenceAfter(after: Long, zone: ZoneId = ZoneId.systemDefault())
 
     if (windowFrom != null && windowTo != null && rule in setOf(Every.MINUTES, Every.HOURS)) {
         val step = Duration.of(n, unit)
-        var d = if (a.toLocalDate() > s.toLocalDate()) a.toLocalDate() else s.toLocalDate()
-        for (i in 0..7) {
+        // a window that ends before it starts runs past midnight (22:00-06:00), so yesterday's may still be open
+        val overnight = windowTo < windowFrom
+        var d = maxOf(a.toLocalDate().minusDays(if (overnight) 1 else 0), s.toLocalDate())
+        for (i in 0..8) {
             if (dayOk(d.atStartOfDay())) {
                 var t = d.atTime(windowFrom / 60, windowFrom % 60)
-                val end = d.atTime(windowTo / 60, windowTo % 60)
+                val end = d.plusDays(if (overnight) 1 else 0).atTime(windowTo / 60, windowTo % 60)
                 while (!t.isAfter(end)) {
                     if (t > a && t >= s) return ms(t)
                     t += step
@@ -162,4 +164,14 @@ data class Data(
     val reminders: List<Reminder> = emptyList(),
     val snoozeMin: Int = 10,
     val silenceMin: Int = 5,
+    val zone: String? = null,            // time zone the stored times were set in
 )
+
+/** After a time zone change, keeps wall-clock times: a 09:00 reminder still rings at 09:00 local time. */
+fun Data.inZone(to: ZoneId): Data {
+    val from = zone?.let(ZoneId::of) ?: return copy(zone = to.id)
+    if (from == to) return this
+    fun shift(t: Long) = LocalDateTime.ofInstant(Instant.ofEpochMilli(t), from).atZone(to).toInstant().toEpochMilli()
+    // nagAt stays: a snooze or nag is "in N minutes", not a time of day
+    return copy(zone = to.id, reminders = reminders.map { it.copy(start = shift(it.start), nextAt = it.nextAt?.let(::shift)) })
+}

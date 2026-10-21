@@ -11,7 +11,7 @@ A reminder and nagging alarm app for Android, styled after Alarmed. Each reminde
 - Nagging: re-alert every N minutes, for a fixed count, for a fixed duration, or until done
 - Snooze, quick adjust buttons (-5m to +1d), and a per-reminder on/off switch
 - Full screen alert over the lock screen, custom sound, vibration
-- Alarms survive reboot, time change, timezone change and app update
+- Alarms survive reboot, time change, timezone change and app update; after a timezone change they keep their local time (09:00 stays 09:00)
 - Daily JSON backup to =Download/Alpy/= (keeps the newest 7, survives uninstall)
 - Self-update from the latest GitHub release
 
@@ -25,7 +25,7 @@ For reliable alarms, allow notifications, full screen intents, and exclude Alpy 
 
 * Build
 
-Needs JDK 17 and Gradle 8.10.
+Needs JDK 17 and Gradle 8.14.
 
 #+begin_src sh
 gradle testReleaseUnitTest assembleRelease
@@ -35,7 +35,7 @@ The APK lands in =app/build/outputs/apk/release/app-release.apk=. Without =KEYST
 
 * Release
 
-Every push to =main= runs [[file:.github/workflows/build.yml][the build workflow]]: it runs the unit tests, builds a signed APK, and publishes it as release =v1.0.<run number>= with the commit message as release notes. The version code equals the run number, which is what the in-app updater compares against.
+Every pull request runs the unit tests and a debug-signed build. Every push to =main= runs [[file:.github/workflows/build.yml][the build workflow]]: it runs the unit tests, builds a signed APK, and publishes it as release =v1.0.<run number>= with the commit message as release notes. The version code equals the run number, which is what the in-app updater compares against.
 
 Required repository secrets:
 
