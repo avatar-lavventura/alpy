@@ -3,6 +3,7 @@ package com.alper.alpy
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +53,8 @@ class AlertActivity : ComponentActivity() {
             act(this, action, kind, id, min)
             finish()
         }
+        // leaving with the back gesture would otherwise close the screen and keep the alarm ringing
+        BackHandler { go("done") }
         val big = Modifier.fillMaxWidth().height(64.dp)
         Surface(Modifier.fillMaxSize()) {
             Column(
