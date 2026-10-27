@@ -656,7 +656,7 @@ private fun ReminderRow(r: Reminder, now: Long, onClick: () -> Unit) {
                 Text(whenLabel(t), style = MaterialTheme.typography.titleMedium, color = if (t < now && !r.done) cs.error else cs.onSurface)
                 Text(" (${rel(t - now)})", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
-            Text(r.title.ifBlank { "(untitled)" }, style = MaterialTheme.typography.titleMedium, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(r.title.ifBlank { "(untitled)" }, style = MaterialTheme.typography.titleMedium, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             val sub = listOfNotNull(r.describe().takeIf { r.rule != Every.ONCE && !r.todo }, r.category.ifBlank { null }).joinToString(" · ")
             if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
