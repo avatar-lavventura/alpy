@@ -122,6 +122,7 @@ import java.time.LocalTime
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import kotlin.math.abs
 
 private sealed interface Screen
@@ -194,6 +195,9 @@ fun NumField(label: String, value: Int, modifier: Modifier = Modifier, onChange:
 
 private val zone get() = ZoneId.systemDefault()
 private val longFmt = DateTimeFormatter.ofPattern("d MMMM EEE HH:mm")
+private val longYearFmt = DateTimeFormatter.ofPattern("d MMMM yyyy EEE HH:mm")
+/** Long date, with the year when it is not this year (so 2030 does not look like this October). */
+private fun longDate(t: LocalDateTime) = t.format(if (t.year == LocalDate.now().year) longFmt else longYearFmt)
 private fun at(ms: Long) = LocalDateTime.ofInstant(Instant.ofEpochMilli(ms), zone)
 private fun ms(t: LocalDateTime) = t.atZone(zone).toInstant().toEpochMilli()
 private fun hm(min: Int) = "%02d:%02d".format(min / 60, min % 60)
@@ -210,7 +214,7 @@ private fun Reminder.describe(): String {
 }
 
 private fun whenLabel(t: Long) = at(t).let {
-    if (it.toLocalDate() == LocalDate.now()) it.format(DateTimeFormatter.ofPattern("HH:mm")) else it.format(longFmt)
+    if (it.toLocalDate() == LocalDate.now()) it.format(DateTimeFormatter.ofPattern("HH:mm")) else longDate(it)
 }
 
 private fun rel(ms: Long): String {
@@ -412,7 +416,9 @@ private fun TypeDateDialog(value: LocalDateTime, close: () -> Unit, onPick: (Loc
 private fun MonthCalendar(selected: LocalDate, onPick: (LocalDate) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val today = remember { LocalDate.now() }
-    val months = remember { (-1L..24L).map { YearMonth.from(today).plusMonths(it) } }
+    // ten years ahead, further if the selected date is later
+    val ahead = maxOf(120L, ChronoUnit.MONTHS.between(YearMonth.from(today), YearMonth.from(selected)))
+    val months = remember(ahead) { (-1L..ahead).map { YearMonth.from(today).plusMonths(it) } }
     val state = rememberLazyListState(months.indexOf(YearMonth.from(selected)).coerceAtLeast(0))
     val title = DateTimeFormatter.ofPattern("MMMM yyyy")
     Column(Modifier.background(cs.surface).padding(horizontal = 16.dp)) {
@@ -511,8 +517,12 @@ private fun Wheel(items: List<String>, selected: Int, modifier: Modifier, onSele
 @Composable
 private fun DateTimeWheel(value: LocalDateTime, onChange: (LocalDateTime) -> Unit) {
     val today = remember { LocalDate.now() }
-    val days = remember { (-30L..730L).map { today.plusDays(it) } }
-    val labels = remember { days.map { if (it == today) "Today" else it.format(DateTimeFormatter.ofPattern("d MMM EEE")) } }
+    // widen past the usual -30..+730 days when a typed or calendar date lies outside, else the wheel loses it
+    val off = ChronoUnit.DAYS.between(today, value.toLocalDate())
+    val from = minOf(-30L, off)
+    val to = maxOf(730L, off)
+    val days = remember(from, to) { (from..to).map { today.plusDays(it) } }
+    val labels = remember(days) { days.map { if (it == today) "Today" else it.format(DateTimeFormatter.ofPattern("d MMM EEE")) } }
     Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
         Wheel(labels, days.indexOf(value.toLocalDate()).coerceAtLeast(0), Modifier.weight(2f)) { onChange(days[it].atTime(value.toLocalTime())) }
         Wheel((0..23).map { "%02d".format(it) }, value.hour, Modifier.weight(1f)) { onChange(value.withHour(it)) }
@@ -585,10 +595,13 @@ private fun UpdateBanner() {
     }
 }
 
-private fun newReminder(d: Data): Reminder {
+/** The next 5-minute mark. */
+private fun soon(): Long {
     val n = LocalDateTime.now().withSecond(0).withNano(0)
-    return Reminder(start = ms(n.plusMinutes(5L - n.minute % 5)), snoozeMin = d.snoozeMin)
+    return ms(n.plusMinutes(5L - n.minute % 5))
 }
+
+private fun newReminder(d: Data) = Reminder(start = soon(), snoozeMin = d.snoozeMin)
 
 @Composable
 private fun RemindersTab(d: Data, now: Long, showDone: Boolean, setDone: (Boolean) -> Unit, open: (Screen) -> Unit) {
@@ -606,7 +619,7 @@ private fun RemindersTab(d: Data, now: Long, showDone: Boolean, setDone: (Boolea
     val list = d.reminders.filter { r -> r.done == showDone && listOf(r.title, r.notes, r.category).any { it.contains(q, true) } }
     if (list.isEmpty()) return Empty(if (showDone) "No Done Reminders" else "No Active Timed Reminders")
     val groups = if (showDone) listOf((0 to "Done") to list.sortedByDescending { it.shownAt() })
-    else list.sortedBy { it.shownAt() }.groupBy { section(it.shownAt()) }.toList().sortedBy { it.first.first }
+    else list.sortedBy { it.shownAt() }.groupBy { if (it.todo) 5 to "To-do" else section(it.shownAt()) }.toList().sortedBy { it.first.first }
     LazyColumn {
         groups.forEach { (sec, rs) ->
             val key = sec.first
@@ -615,7 +628,7 @@ private fun RemindersTab(d: Data, now: Long, showDone: Boolean, setDone: (Boolea
                 HorizontalDivider()
             }
             if (key !in collapsed) items(rs, key = { it.id }) { r ->
-                ReminderRow(r, now) { if (showDone) open(EditR(r)) else expanded = if (expanded == r.id) null else r.id }
+                ReminderRow(r, now) { if (showDone || r.todo) open(EditR(r)) else expanded = if (expanded == r.id) null else r.id }
                 if (expanded == r.id) QuickPanel(r, { open(EditR(r)) }, { notes = r })
             }
         }
@@ -637,14 +650,14 @@ private fun ReminderRow(r: Reminder, now: Long, onClick: () -> Unit) {
         Modifier.fillMaxWidth().background(cs.surface).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PowerIcon(r.enabled) { act(ctx, if (r.enabled) "off" else "on", "r", r.id) }
+        if (r.todo) Spacer(Modifier.size(36.dp)) else PowerIcon(r.enabled) { act(ctx, if (r.enabled) "off" else "on", "r", r.id) }
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            if (!r.todo) Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(whenLabel(t), style = MaterialTheme.typography.titleMedium, color = if (t < now && !r.done) cs.error else cs.onSurface)
                 Text(" (${rel(t - now)})", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             Text(r.title.ifBlank { "(untitled)" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            val sub = listOfNotNull(r.describe().takeIf { r.rule != Every.ONCE }, r.category.ifBlank { null }).joinToString(" · ")
+            val sub = listOfNotNull(r.describe().takeIf { r.rule != Every.ONCE && !r.todo }, r.category.ifBlank { null }).joinToString(" · ")
             if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
         Checkbox(r.done, { act(ctx, if (r.done) "uncheck" else "check", "r", r.id) })
@@ -783,7 +796,7 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     var r by remember { mutableStateOf(initial) }
-    var picker by remember { mutableStateOf(if (initial.id == 0) "wheel" else "") }
+    var picker by remember { mutableStateOf(if (initial.id == 0 && !initial.todo) "wheel" else "") }
     var more by remember { mutableStateOf(initial.id != 0) }
     var dialog by remember { mutableStateOf<String?>(null) }
     var leadOpen by remember { mutableStateOf(false) }
@@ -802,17 +815,22 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
             saved = x
             d.copy(nextId = maxOf(d.nextId, id + 1), reminders = d.reminders.filter { it.id != id } + x)
         }
-        saved?.let { Alarms.sync(ctx, it); if (it.nextAt == null) Toast.makeText(ctx, "Saved, but that time has passed", Toast.LENGTH_LONG).show() }
+        saved?.let { Alarms.sync(ctx, it); if (it.nextAt == null && !it.todo) Toast.makeText(ctx, "Saved, but that time has passed", Toast.LENGTH_LONG).show() }
         Unit
     }
     EditorScaffold(if (r.id == 0) "New Reminder" else "Reminder", back, save) {
         Spacer(Modifier.height(24.dp))
         HorizontalDivider()
         FieldRow(r.title, "Title") { r = r.copy(title = it) }
-        Row(Modifier.fillMaxWidth().background(cs.surface).clickable { picker = if (picker == "") "wheel" else "" }.padding(16.dp)) {
+        SwitchRow("To-do (no date)", r.todo) { on ->
+            // back to a timed reminder: an old start would be saved as already passed
+            r = r.copy(todo = on, start = if (on) r.start else maxOf(r.start, soon()))
+            picker = if (on) "" else "wheel"
+        }
+        if (!r.todo) Row(Modifier.fillMaxWidth().background(cs.surface).clickable { picker = if (picker == "") "wheel" else "" }.padding(16.dp)) {
             Text("Alarm", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
             Text(
-                start.format(longFmt), style = MaterialTheme.typography.bodyLarge,
+                longDate(start), style = MaterialTheme.typography.bodyLarge,
                 color = if (r.start <= System.currentTimeMillis()) cs.error else if (picker != "") cs.primary else cs.onSurface,
             )
         }
@@ -842,33 +860,34 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
             }
             HorizontalDivider()
         } else {
-            SectionHeader("Do-it / Delay-it options")
-            NavRow("Nag-Me", if (r.nag) "Every ${r.nagEveryMin} min" else "(Off)") { dialog = "nag" }
-            NavRow("Actionable Snooze", "(${r.snoozeMin} min)") { dialog = "snooze" }
+            if (!r.todo) {
+                SectionHeader("Do-it / Delay-it options")
+                NavRow("Nag-Me", if (r.nag) "Every ${r.nagEveryMin} min" else "(Off)") { dialog = "nag" }
+                NavRow("Actionable Snooze", "(${r.snoozeMin} min)") { dialog = "snooze" }
 
-            SectionHeader("Repeat options")
-            NavRow("Repeat", if (r.windowFrom != null) "DayMinder" else r.describe()) { dialog = "repeat" }
-            NavRow("DayMinder", r.windowFrom?.let { "${hm(it)}-${hm(r.windowTo ?: it)}" } ?: "Off") { dialog = "dayminder" }
+                SectionHeader("Repeat options")
+                NavRow("Repeat", if (r.windowFrom != null) "DayMinder" else r.describe()) { dialog = "repeat" }
+                NavRow("DayMinder", r.windowFrom?.let { "${hm(it)}-${hm(r.windowTo ?: it)}" } ?: "Off") { dialog = "dayminder" }
 
-            SectionHeader("Alarm options")
-            MelodyRow(r.sound) { r = r.copy(sound = it) }
-            SwitchRow("Alert Message", r.fullScreen) { r = r.copy(fullScreen = it) }
-            SwitchRow("Sound", r.soundOn) { r = r.copy(soundOn = it) }
+                SectionHeader("Alarm options")
+                MelodyRow(r.sound) { r = r.copy(sound = it) }
+                SwitchRow("Alert Message", r.fullScreen) { r = r.copy(fullScreen = it) }
+                SwitchRow("Sound", r.soundOn) { r = r.copy(soundOn = it) }
 
-            SectionHeader("Pre-alarm options")
-            Row(Modifier.fillMaxWidth().background(cs.surface).clickable { leadOpen = !leadOpen }.padding(16.dp)) {
-                Text("Lead Time", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                Text(leadLabel(r.preMin), color = if (leadOpen) cs.primary else cs.onSurface, style = MaterialTheme.typography.bodyLarge)
-            }
-            if (leadOpen) {
-                Row(Modifier.fillMaxWidth().background(cs.surface).padding(horizontal = 48.dp)) {
-                    Wheel((1..120).map { "$it" }, leadN - 1, Modifier.weight(1f)) { setLead(it + 1, leadU) }
-                    Wheel(leadUnits.map { it.first }, leadU, Modifier.weight(2f)) { setLead(leadN, it) }
+                SectionHeader("Pre-alarm options")
+                Row(Modifier.fillMaxWidth().background(cs.surface).clickable { leadOpen = !leadOpen }.padding(16.dp)) {
+                    Text("Lead Time", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Text(leadLabel(r.preMin), color = if (leadOpen) cs.primary else cs.onSurface, style = MaterialTheme.typography.bodyLarge)
                 }
+                if (leadOpen) {
+                    Row(Modifier.fillMaxWidth().background(cs.surface).padding(horizontal = 48.dp)) {
+                        Wheel((1..120).map { "$it" }, leadN - 1, Modifier.weight(1f)) { setLead(it + 1, leadU) }
+                        Wheel(leadUnits.map { it.first }, leadU, Modifier.weight(2f)) { setLead(leadN, it) }
+                    }
+                }
+                HorizontalDivider()
+                if (r.preMin > 0) MelodyRow(r.preSound) { r = r.copy(preSound = it) }
             }
-            HorizontalDivider()
-            if (r.preMin > 0) MelodyRow(r.preSound) { r = r.copy(preSound = it) }
-
             SectionHeader("Category")
             FieldRow(r.category, "None") { r = r.copy(category = it) }
             SectionHeader("Notes")

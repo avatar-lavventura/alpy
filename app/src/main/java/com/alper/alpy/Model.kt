@@ -29,6 +29,7 @@ data class Reminder(
     val snoozeMin: Int = 10,
     val enabled: Boolean = true,         // alarm on/off (power button)
     val done: Boolean = false,           // checked off, shown under Done
+    val todo: Boolean = false,           // no date: never rings, listed under To-do
     val start: Long = 0,                 // first occurrence, epoch ms
     val rule: Every = Every.ONCE,
     val every: Int = 1,
@@ -64,6 +65,7 @@ fun leadLabel(min: Int) = leadSplit(min).let { (n, u) ->
 
 /** First occurrence strictly after [after], or null when there is none. */
 fun Reminder.occurrenceAfter(after: Long, zone: ZoneId = ZoneId.systemDefault()): Long? {
+    if (todo) return null
     val s = LocalDateTime.ofInstant(Instant.ofEpochMilli(start), zone).withSecond(0).withNano(0)
     val a = LocalDateTime.ofInstant(Instant.ofEpochMilli(after), zone)
     fun ms(t: LocalDateTime) = t.atZone(zone).toInstant().toEpochMilli()
