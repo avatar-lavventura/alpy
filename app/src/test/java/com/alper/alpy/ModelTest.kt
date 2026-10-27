@@ -94,6 +94,13 @@ class ModelTest {
         assertTrue(Reminder(start = start, nextAt = start).check(z).done)
     }
 
+    @Test fun todoNeverRingsAndChecksOff() {
+        val r = Reminder(start = ms("2026-10-14T09:00"), todo = true).rescheduled(ms("2026-10-14T08:00"))
+        assertNull(r.nextAt)
+        assertNull(r.fireAt())
+        assertTrue(r.check(z).done)
+    }
+
     @Test fun adjustOverduePushesFromNow() {
         val r = Reminder(start = ms("2026-10-14T09:00"))
         assertEquals(ms("2026-10-14T10:05"), r.adjust(5 * 60_000, ms("2026-10-14T10:00:30")).nextAt)

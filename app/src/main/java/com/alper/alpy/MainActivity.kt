@@ -595,10 +595,13 @@ private fun UpdateBanner() {
     }
 }
 
-private fun newReminder(d: Data): Reminder {
+/** The next 5-minute mark. */
+private fun soon(): Long {
     val n = LocalDateTime.now().withSecond(0).withNano(0)
-    return Reminder(start = ms(n.plusMinutes(5L - n.minute % 5)), snoozeMin = d.snoozeMin)
+    return ms(n.plusMinutes(5L - n.minute % 5))
 }
+
+private fun newReminder(d: Data) = Reminder(start = soon(), snoozeMin = d.snoozeMin)
 
 @Composable
 private fun RemindersTab(d: Data, now: Long, showDone: Boolean, setDone: (Boolean) -> Unit, open: (Screen) -> Unit) {
@@ -616,7 +619,7 @@ private fun RemindersTab(d: Data, now: Long, showDone: Boolean, setDone: (Boolea
     val list = d.reminders.filter { r -> r.done == showDone && listOf(r.title, r.notes, r.category).any { it.contains(q, true) } }
     if (list.isEmpty()) return Empty(if (showDone) "No Done Reminders" else "No Active Timed Reminders")
     val groups = if (showDone) listOf((0 to "Done") to list.sortedByDescending { it.shownAt() })
-    else list.sortedBy { it.shownAt() }.groupBy { section(it.shownAt()) }.toList().sortedBy { it.first.first }
+    else list.sortedBy { it.shownAt() }.groupBy { if (it.todo) 5 to "To-do" else section(it.shownAt()) }.toList().sortedBy { it.first.first }
     LazyColumn {
         groups.forEach { (sec, rs) ->
             val key = sec.first
@@ -625,7 +628,7 @@ private fun RemindersTab(d: Data, now: Long, showDone: Boolean, setDone: (Boolea
                 HorizontalDivider()
             }
             if (key !in collapsed) items(rs, key = { it.id }) { r ->
-                ReminderRow(r, now) { if (showDone) open(EditR(r)) else expanded = if (expanded == r.id) null else r.id }
+                ReminderRow(r, now) { if (showDone || r.todo) open(EditR(r)) else expanded = if (expanded == r.id) null else r.id }
                 if (expanded == r.id) QuickPanel(r, { open(EditR(r)) }, { notes = r })
             }
         }
@@ -647,14 +650,14 @@ private fun ReminderRow(r: Reminder, now: Long, onClick: () -> Unit) {
         Modifier.fillMaxWidth().background(cs.surface).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PowerIcon(r.enabled) { act(ctx, if (r.enabled) "off" else "on", "r", r.id) }
+        if (r.todo) Spacer(Modifier.size(36.dp)) else PowerIcon(r.enabled) { act(ctx, if (r.enabled) "off" else "on", "r", r.id) }
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            if (!r.todo) Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(whenLabel(t), style = MaterialTheme.typography.titleMedium, color = if (t < now && !r.done) cs.error else cs.onSurface)
                 Text(" (${rel(t - now)})", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             Text(r.title.ifBlank { "(untitled)" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            val sub = listOfNotNull(r.describe().takeIf { r.rule != Every.ONCE }, r.category.ifBlank { null }).joinToString(" · ")
+            val sub = listOfNotNull(r.describe().takeIf { r.rule != Every.ONCE && !r.todo }, r.category.ifBlank { null }).joinToString(" · ")
             if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
         Checkbox(r.done, { act(ctx, if (r.done) "uncheck" else "check", "r", r.id) })
@@ -793,7 +796,7 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     var r by remember { mutableStateOf(initial) }
-    var picker by remember { mutableStateOf(if (initial.id == 0) "wheel" else "") }
+    var picker by remember { mutableStateOf(if (initial.id == 0 && !initial.todo) "wheel" else "") }
     var more by remember { mutableStateOf(initial.id != 0) }
     var dialog by remember { mutableStateOf<String?>(null) }
     var leadOpen by remember { mutableStateOf(false) }
@@ -812,14 +815,19 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
             saved = x
             d.copy(nextId = maxOf(d.nextId, id + 1), reminders = d.reminders.filter { it.id != id } + x)
         }
-        saved?.let { Alarms.sync(ctx, it); if (it.nextAt == null) Toast.makeText(ctx, "Saved, but that time has passed", Toast.LENGTH_LONG).show() }
+        saved?.let { Alarms.sync(ctx, it); if (it.nextAt == null && !it.todo) Toast.makeText(ctx, "Saved, but that time has passed", Toast.LENGTH_LONG).show() }
         Unit
     }
     EditorScaffold(if (r.id == 0) "New Reminder" else "Reminder", back, save) {
         Spacer(Modifier.height(24.dp))
         HorizontalDivider()
         FieldRow(r.title, "Title") { r = r.copy(title = it) }
-        Row(Modifier.fillMaxWidth().background(cs.surface).clickable { picker = if (picker == "") "wheel" else "" }.padding(16.dp)) {
+        SwitchRow("To-do (no date)", r.todo) { on ->
+            // back to a timed reminder: an old start would be saved as already passed
+            r = r.copy(todo = on, start = if (on) r.start else maxOf(r.start, soon()))
+            picker = if (on) "" else "wheel"
+        }
+        if (!r.todo) Row(Modifier.fillMaxWidth().background(cs.surface).clickable { picker = if (picker == "") "wheel" else "" }.padding(16.dp)) {
             Text("Alarm", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
             Text(
                 longDate(start), style = MaterialTheme.typography.bodyLarge,
@@ -852,33 +860,34 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
             }
             HorizontalDivider()
         } else {
-            SectionHeader("Do-it / Delay-it options")
-            NavRow("Nag-Me", if (r.nag) "Every ${r.nagEveryMin} min" else "(Off)") { dialog = "nag" }
-            NavRow("Actionable Snooze", "(${r.snoozeMin} min)") { dialog = "snooze" }
+            if (!r.todo) {
+                SectionHeader("Do-it / Delay-it options")
+                NavRow("Nag-Me", if (r.nag) "Every ${r.nagEveryMin} min" else "(Off)") { dialog = "nag" }
+                NavRow("Actionable Snooze", "(${r.snoozeMin} min)") { dialog = "snooze" }
 
-            SectionHeader("Repeat options")
-            NavRow("Repeat", if (r.windowFrom != null) "DayMinder" else r.describe()) { dialog = "repeat" }
-            NavRow("DayMinder", r.windowFrom?.let { "${hm(it)}-${hm(r.windowTo ?: it)}" } ?: "Off") { dialog = "dayminder" }
+                SectionHeader("Repeat options")
+                NavRow("Repeat", if (r.windowFrom != null) "DayMinder" else r.describe()) { dialog = "repeat" }
+                NavRow("DayMinder", r.windowFrom?.let { "${hm(it)}-${hm(r.windowTo ?: it)}" } ?: "Off") { dialog = "dayminder" }
 
-            SectionHeader("Alarm options")
-            MelodyRow(r.sound) { r = r.copy(sound = it) }
-            SwitchRow("Alert Message", r.fullScreen) { r = r.copy(fullScreen = it) }
-            SwitchRow("Sound", r.soundOn) { r = r.copy(soundOn = it) }
+                SectionHeader("Alarm options")
+                MelodyRow(r.sound) { r = r.copy(sound = it) }
+                SwitchRow("Alert Message", r.fullScreen) { r = r.copy(fullScreen = it) }
+                SwitchRow("Sound", r.soundOn) { r = r.copy(soundOn = it) }
 
-            SectionHeader("Pre-alarm options")
-            Row(Modifier.fillMaxWidth().background(cs.surface).clickable { leadOpen = !leadOpen }.padding(16.dp)) {
-                Text("Lead Time", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                Text(leadLabel(r.preMin), color = if (leadOpen) cs.primary else cs.onSurface, style = MaterialTheme.typography.bodyLarge)
-            }
-            if (leadOpen) {
-                Row(Modifier.fillMaxWidth().background(cs.surface).padding(horizontal = 48.dp)) {
-                    Wheel((1..120).map { "$it" }, leadN - 1, Modifier.weight(1f)) { setLead(it + 1, leadU) }
-                    Wheel(leadUnits.map { it.first }, leadU, Modifier.weight(2f)) { setLead(leadN, it) }
+                SectionHeader("Pre-alarm options")
+                Row(Modifier.fillMaxWidth().background(cs.surface).clickable { leadOpen = !leadOpen }.padding(16.dp)) {
+                    Text("Lead Time", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Text(leadLabel(r.preMin), color = if (leadOpen) cs.primary else cs.onSurface, style = MaterialTheme.typography.bodyLarge)
                 }
+                if (leadOpen) {
+                    Row(Modifier.fillMaxWidth().background(cs.surface).padding(horizontal = 48.dp)) {
+                        Wheel((1..120).map { "$it" }, leadN - 1, Modifier.weight(1f)) { setLead(it + 1, leadU) }
+                        Wheel(leadUnits.map { it.first }, leadU, Modifier.weight(2f)) { setLead(leadN, it) }
+                    }
+                }
+                HorizontalDivider()
+                if (r.preMin > 0) MelodyRow(r.preSound) { r = r.copy(preSound = it) }
             }
-            HorizontalDivider()
-            if (r.preMin > 0) MelodyRow(r.preSound) { r = r.copy(preSound = it) }
-
             SectionHeader("Category")
             FieldRow(r.category, "None") { r = r.copy(category = it) }
             SectionHeader("Notes")
