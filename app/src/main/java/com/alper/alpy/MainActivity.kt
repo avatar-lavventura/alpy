@@ -122,6 +122,7 @@ import java.time.LocalTime
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import kotlin.math.abs
 
 private sealed interface Screen
@@ -194,6 +195,9 @@ fun NumField(label: String, value: Int, modifier: Modifier = Modifier, onChange:
 
 private val zone get() = ZoneId.systemDefault()
 private val longFmt = DateTimeFormatter.ofPattern("d MMMM EEE HH:mm")
+private val longYearFmt = DateTimeFormatter.ofPattern("d MMMM yyyy EEE HH:mm")
+/** Long date, with the year when it is not this year (so 2030 does not look like this October). */
+private fun longDate(t: LocalDateTime) = t.format(if (t.year == LocalDate.now().year) longFmt else longYearFmt)
 private fun at(ms: Long) = LocalDateTime.ofInstant(Instant.ofEpochMilli(ms), zone)
 private fun ms(t: LocalDateTime) = t.atZone(zone).toInstant().toEpochMilli()
 private fun hm(min: Int) = "%02d:%02d".format(min / 60, min % 60)
@@ -210,7 +214,7 @@ private fun Reminder.describe(): String {
 }
 
 private fun whenLabel(t: Long) = at(t).let {
-    if (it.toLocalDate() == LocalDate.now()) it.format(DateTimeFormatter.ofPattern("HH:mm")) else it.format(longFmt)
+    if (it.toLocalDate() == LocalDate.now()) it.format(DateTimeFormatter.ofPattern("HH:mm")) else longDate(it)
 }
 
 private fun rel(ms: Long): String {
@@ -412,7 +416,9 @@ private fun TypeDateDialog(value: LocalDateTime, close: () -> Unit, onPick: (Loc
 private fun MonthCalendar(selected: LocalDate, onPick: (LocalDate) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val today = remember { LocalDate.now() }
-    val months = remember { (-1L..24L).map { YearMonth.from(today).plusMonths(it) } }
+    // ten years ahead, further if the selected date is later
+    val ahead = maxOf(120L, ChronoUnit.MONTHS.between(YearMonth.from(today), YearMonth.from(selected)))
+    val months = remember(ahead) { (-1L..ahead).map { YearMonth.from(today).plusMonths(it) } }
     val state = rememberLazyListState(months.indexOf(YearMonth.from(selected)).coerceAtLeast(0))
     val title = DateTimeFormatter.ofPattern("MMMM yyyy")
     Column(Modifier.background(cs.surface).padding(horizontal = 16.dp)) {
@@ -511,8 +517,12 @@ private fun Wheel(items: List<String>, selected: Int, modifier: Modifier, onSele
 @Composable
 private fun DateTimeWheel(value: LocalDateTime, onChange: (LocalDateTime) -> Unit) {
     val today = remember { LocalDate.now() }
-    val days = remember { (-30L..730L).map { today.plusDays(it) } }
-    val labels = remember { days.map { if (it == today) "Today" else it.format(DateTimeFormatter.ofPattern("d MMM EEE")) } }
+    // widen past the usual -30..+730 days when a typed or calendar date lies outside, else the wheel loses it
+    val off = ChronoUnit.DAYS.between(today, value.toLocalDate())
+    val from = minOf(-30L, off)
+    val to = maxOf(730L, off)
+    val days = remember(from, to) { (from..to).map { today.plusDays(it) } }
+    val labels = remember(days) { days.map { if (it == today) "Today" else it.format(DateTimeFormatter.ofPattern("d MMM EEE")) } }
     Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
         Wheel(labels, days.indexOf(value.toLocalDate()).coerceAtLeast(0), Modifier.weight(2f)) { onChange(days[it].atTime(value.toLocalTime())) }
         Wheel((0..23).map { "%02d".format(it) }, value.hour, Modifier.weight(1f)) { onChange(value.withHour(it)) }
@@ -812,7 +822,7 @@ private fun ReminderEditor(initial: Reminder, back: () -> Unit) {
         Row(Modifier.fillMaxWidth().background(cs.surface).clickable { picker = if (picker == "") "wheel" else "" }.padding(16.dp)) {
             Text("Alarm", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
             Text(
-                start.format(longFmt), style = MaterialTheme.typography.bodyLarge,
+                longDate(start), style = MaterialTheme.typography.bodyLarge,
                 color = if (r.start <= System.currentTimeMillis()) cs.error else if (picker != "") cs.primary else cs.onSurface,
             )
         }
