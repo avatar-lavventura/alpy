@@ -125,6 +125,7 @@ object Alerts {
             .setSmallIcon(ICON).setContentTitle(title).setContentText(text)
             .setCategory(Notification.CATEGORY_ALARM).setContentIntent(screen)
             .apply { if (full) setFullScreenIntent(screen, true) }
+            .setDeleteIntent(broadcast(ctx, "done", kind, id)) // swiping it away (allowed from Android 14) counts as Done
             .addAction(action(ctx, "Done", "done", kind, id))
             .addAction(action(ctx, "Snooze $snooze min", "snooze", kind, id, snooze))
             .build()
